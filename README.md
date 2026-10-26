@@ -1,146 +1,242 @@
 # deepseek-harness-tui
 
-一个 DeepSeek Harness（dsh）的全屏终端对话界面，界面照着 [opencode](https://github.com/anomalyco/opencode) 的会话页做，用 [OpenTUI](https://opentui.com) 渲染。它作为 dsh 的一个 bundle 运行在 dsh 进程内（`dsh --profile tui`），所以能拿到逐字流式输出、工具调用、审批和提问这些进程内事件。
+在终端里和 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下面简称 dsh）的 agent 对话。界面照着 [opencode](https://github.com/anomalyco/opencode) 做：上面是对话，下面是输入框，agent 读文件、跑命令、改代码的过程都会显示出来，需要权限时会弹出确认。
 
 ```
  ┃
  ┃  读一下 package.json 的 name
  ┃
 
-   → 读取 package.json
+     → 读取 package.json
 
      pty-demo
 
-   ▣ deepseek-v4-flash · 5.7s
+     ▣ deepseek-flash · 5.7s
 
  ┃
  ┃  输入消息，/ 查看命令
- ┃  deepseek-v4-flash deepseek
  ┃
- ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ┃  deepseek-flash deepseek-official
+ ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ~/project                  enter 发送  / 命令  ctrl+c 退出
 ```
 
+它不是一个独立的程序，而是 dsh 的插件：你在哪个目录启动 `dshcli`，agent 就在哪个目录里干活，会话记录和 dsh 网页版共用。
+
 ## 安装
 
-需要：
+下面的步骤按顺序做一遍就能用。假设你把两个仓库都放在 `~/dsh` 目录下，换成别的目录也行，只要两个仓库在同一个父目录里。
 
-- 一个已经 `pnpm install && pnpm run build` 过的 deepseek-harness 源码仓库。
-- 一个带 `node:ffi` 的 Node.js（≥ 26.4）。OpenTUI 的原生核心通过 `node:ffi` 调用。Homebrew 的 Node 编译时没带 FFI，要用 nodejs.org 的官方构建：
+目前只在 macOS（Apple Silicon）上测过。Linux 应该能用，Windows 不支持。
 
-  ```sh
-  # 版本按需替换；解压到 ~/.local/share/dsh-tui/node 后 bin/dshcli 会自动使用
-  V=v26.12.1
-  curl -fLO https://nodejs.org/dist/$V/node-$V-darwin-arm64.tar.xz
-  mkdir -p ~/.local/share/dsh-tui && tar -xJf node-$V-darwin-arm64.tar.xz -C ~/.local/share/dsh-tui
-  ln -sfn node-$V-darwin-arm64 ~/.local/share/dsh-tui/node
-  ```
+### 1. 准备 Node.js 26 和 pnpm
 
-然后安装本仓库的依赖，再在 dsh 仓库里把本仓库根目录装进一个独立的 `tui` profile。下面假设两个仓库放在同一个目录下：
+界面库 OpenTUI 需要 Node.js 的 `node:ffi` 模块，这个模块要 Node 26.4 以上，而且只有 nodejs.org 发布的官方版本带。Homebrew 装的 Node 不带，用不了。
+
+最省事的是用 [nvm](https://github.com/nvm-sh/nvm) 装（它下载的就是官方版本）：
 
 ```sh
-cd deepseek-harness-tui && pnpm install
-cd ../deepseek-harness
-pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"
+nvm install 26
+nvm use 26
+npm install -g pnpm
 ```
 
-这是 `link:` 安装，改本仓库的代码后重启 TUI 即生效，不用重装。`pnpm install` 会把 `packages/*` 链接进 `node_modules`，并装上 OpenTUI；dsh 靠这些链接按包名加载各个插件。
-
-模型配置写在 `~/.dsh/profiles/tui/cordis.patch.yml`（`llm-pi-ai` 提供商和 `agent-default-model` 默认模型），凭据和 Web 共用 `~/.dsh/.credentials.yaml`。
-
-## 运行
-
-在你要工作的项目目录里执行（可以把 `bin/dshcli` 链接到 `PATH` 里的目录，例如 `ln -s "$PWD/bin/dshcli" ~/.local/bin/dshcli`）：
+装完检查一下，输出 `ok` 就对了：
 
 ```sh
-/path/to/deepseek-harness-tui/bin/dshcli
+node --experimental-ffi --input-type=module -e "await import('node:ffi'); console.log('ok')"
 ```
 
-`bin/dshcli` 用和 `pnpm dsh` 相同的方式从源码启动 dsh，但保留当前目录作为 agent 的工作区（`pnpm dsh` 总是以 dsh 仓库根目录为工作目录）。它按 `$DSH_TUI_NODE`、`~/.local/share/dsh-tui/node/bin/node`、`PATH` 里的 `node` 的顺序找第一个带 `node:ffi` 的 Node，并加上 `--experimental-ffi` 启动。dsh 仓库默认在本仓库的同级目录 `../deepseek-harness`，不在那里时设置 `DSH_REPO`。
+如果你想继续用 Homebrew 的 Node 做别的事，也可以只给本项目准备一份官方 Node：从 nodejs.org 下载对应平台的压缩包，解压后把目录链接到 `~/.local/share/dsh-tui/node`。`dshcli` 启动时会优先找这里。
 
-### 命令
+```sh
+V=v26.12.1
+ARCH=darwin-arm64        # Intel Mac 用 darwin-x64，Linux 用 linux-x64
+curl -fLO https://nodejs.org/dist/$V/node-$V-$ARCH.tar.xz
+mkdir -p ~/.local/share/dsh-tui
+tar -xJf node-$V-$ARCH.tar.xz -C ~/.local/share/dsh-tui
+ln -sfn node-$V-$ARCH ~/.local/share/dsh-tui/node
+```
 
-| 命令 | 作用 |
-|---|---|
-| `/help` | 列出命令和按键 |
-| `/model` | 打开模型选择面板，输入文字过滤（只影响当前会话） |
-| `/model <provider>/<model>` | 直接切换 |
-| `/new` | 保存当前会话，清屏开始新会话 |
-| `/session` | 显示会话 id、模型、目录 |
-| `/exit` | 保存并退出 |
+### 2. 下载并构建 dsh
 
-输入 `/` 时输入框上方会列出匹配的命令：↑↓ 选择，Tab 补全，回车直接执行。
+```sh
+mkdir -p ~/dsh && cd ~/dsh
+git clone https://github.com/deepseek-ai/deepseek-harness.git
+cd deepseek-harness
+pnpm install
+pnpm run build
+```
+
+`pnpm run build` 要跑一会儿。
+
+### 3. 下载本仓库
+
+```sh
+cd ~/dsh
+git clone https://github.com/Excalibur0w0/deepseek-harness-tui.git
+cd deepseek-harness-tui
+pnpm install
+```
+
+### 4. 把本仓库装进 dsh
+
+dsh 用 profile 区分不同的用法，本项目装在名为 `tui` 的 profile 里。这一步要回到 dsh 的目录执行：
+
+```sh
+cd ~/dsh/deepseek-harness
+pnpm dsh plugin --profile tui add ~/dsh/deepseek-harness-tui
+```
+
+第一次执行会创建 `~/.dsh/profiles/tui` 目录。装的是链接，以后改本仓库的代码，重启 `dshcli` 就生效，不用重装。
+
+检查是否装好：
+
+```sh
+pnpm dsh --profile tui --dump-config | grep "id: tui-"
+```
+
+能看到 `tui-console`、`tui-chat`、`tui-transcript`、`tui-interaction`、`tui-commands` 五行就对了。
+
+### 5. 配置 API key
+
+默认用 DeepSeek 官方 API 的 `deepseek-flash` 模型。到 [platform.deepseek.com](https://platform.deepseek.com) 申请一个 key，写进 `~/.dsh/.env`：
+
+```sh
+echo 'DEEPSEEK_API_KEY=sk-你的key' >> ~/.dsh/.env
+```
+
+想用别的模型服务，看后面的「换成别的模型」。
+
+### 6. 把 `dshcli` 加到命令行
+
+```sh
+mkdir -p ~/.local/bin
+ln -s ~/dsh/deepseek-harness-tui/bin/dshcli ~/.local/bin/dshcli
+```
+
+`~/.local/bin` 要在 `PATH` 里。如果敲 `dshcli` 提示找不到命令，在 `~/.zshrc`（或 `~/.bashrc`）里加一行 `export PATH="$HOME/.local/bin:$PATH"`，然后开一个新终端。
+
+### 7. 启动
+
+进到你想让 agent 干活的项目目录，运行：
+
+```sh
+cd ~/某个项目
+dshcli
+```
+
+看到底部的输入框就说明成功了。随便问一句，比如「这个项目是做什么的」。按 Ctrl-D 或输入 `/exit` 退出，会话会自动保存。
+
+## 使用
 
 ### 按键
 
 | 按键 | 作用 |
 |---|---|
-| Enter | 发送；运行中按下则排队（显示「排队中」），当前回合结束后发送 |
-| Shift+Enter / Alt+Enter / Ctrl-J | 换行 |
-| Esc | 运行中中断当前回合 |
-| Ctrl-C | 有选中文字时复制；运行中中断；空闲时清空输入，连按两次退出 |
-| Ctrl-D | 输入为空时退出 |
-| Ctrl-V | 粘贴剪贴板里的图片（插入 `[图片 N]` 占位）或文字 |
-| ↑ / ↓ | 翻看输入历史 |
-| PgUp / PgDn、鼠标滚轮 | 滚动对话 |
-| Ctrl-T | 展开或折叠思考过程 |
+| Enter | 发送。agent 还在跑时按下，消息会排队，等这一轮结束再发 |
+| Shift+Enter、Alt+Enter、Ctrl-J | 换行 |
+| Esc | 打断正在跑的这一轮 |
+| Ctrl-C | 有选中的文字时复制；agent 在跑时打断；空闲时清空输入，连按两次退出 |
+| Ctrl-D | 输入框为空时退出 |
+| Ctrl-V | 粘贴剪贴板里的图片或文字 |
+| ↑ / ↓ | 翻看之前输入过的内容 |
+| PgUp / PgDn、鼠标滚轮 | 上下滚动对话 |
+| Ctrl-T | 展开或收起模型的思考过程 |
 
-用鼠标拖选对话中的文字，松开即复制（OSC 52，macOS 上同时走 `pbcopy`）。
+用鼠标选中对话里的文字，松开就复制好了。
 
-### 图片
+### 命令
 
-和 opencode 一样，按 Ctrl-V 时如果剪贴板里是图片，输入框会插入一个高亮的 `[图片 N]` 占位，退格可以整块删掉；把图片文件（png、jpg、webp、gif）拖进终端也一样。发送时图片按占位的位置和文字一起组成消息，先存进 dsh 的附件存储，消息里只记录引用；对话里的用户消息下方会显示 ` 图片 ` 和尺寸。
+在输入框里打 `/` 会弹出命令列表，上下键选，回车执行。
 
-读取剪贴板用的是系统工具：macOS 用 `osascript`，Linux 用 `wl-paste` 或 `xclip`，Windows 用 PowerShell。
+| 命令 | 作用 |
+|---|---|
+| `/help` | 列出所有命令和按键 |
+| `/model` | 切换模型，可以打字过滤。只对当前会话有效 |
+| `/model <provider>/<model>` | 直接切到指定模型 |
+| `/new` | 保存当前会话，开一个新的 |
+| `/session` | 看当前会话的 id、模型和目录 |
+| `/exit` | 保存并退出 |
 
-模型要在配置里声明支持图片输入，图片才会发出去；没有声明的模型会拒绝发送并提示「不支持图片输入」。`llm-pi-ai` 里自定义的模型默认只有文本输入，可以在模型条目上写 `input: [text, image]`，或者在 provider 上写 `defaultInput: [text, image]`。
+### 确认权限
 
-### 审批和提问
+agent 要做超出当前目录的事（比如往家目录写文件），输入框会换成一个黄色的「△ 需要确认」面板。左右键在「允许一次」和「拒绝」之间切换，回车确认；也可以直接按 `y` 允许、`n` 或 Esc 拒绝。
 
-工具需要更高权限时，输入框会换成黄色竖线的「△ 需要确认」面板：←/→ 在「允许一次」「拒绝」之间切换，回车确认，`y`/`n` 直接选，Esc 拒绝。被拒绝的工具行会划掉。
+### 回答 agent 的提问
 
-模型调用 `ask_user_question` 时会出现提问面板：↑↓ 或数字键选择，多选题用空格勾选，回车确认；最后一项「输入自己的答案…」切换成输入框，Esc 返回选项或撤回提问。`dsh-base` 默认不带这个工具，本 bundle 额外插入了 `tool-ask-user` 行。
+agent 有时会给你几个选项让你选。上下键或数字键选，多选题用空格勾选，回车确认。最后一项「输入自己的答案…」可以自己打字。
 
-## 界面
+### 发图片
 
-照 opencode 的会话页：
+截图后在输入框按 Ctrl-V，会插入一个 `[图片 1]`。把图片文件拖进终端也一样。支持 png、jpg、webp、gif。按一次退格可以把整个 `[图片 1]` 删掉。
 
-- **用户消息**：左侧蓝色 `┃` 竖线加深色面板。
-- **回复**：按 Markdown 渲染（代码块高亮支持 js/ts/markdown/zig）。
-- **思考**：流式时显示「思考中」，结束后折叠成「+ 已思考 · 耗时」，Ctrl-T 展开。
-- **工具调用**：一行图标加标题，运行中图标换成 spinner，失败标红：
-  - `→ 读取`、`← 写入/编辑`、`$ 命令`、`✱ 查找文件/搜索`、`% 抓取`、`◈ 搜索网页`
-  - bash 显示为带输出的面板，edit 显示 diff，todo_write 显示待办列表
-- **回合脚注**：每个回合结束显示 `▣ 模型 · 耗时`，被中断时加「已中断」。
-- **配色**：opencode 默认暗色主题；设置 `NO_COLOR` 时用灰度。
+模型得支持看图才能发。不支持的模型会提示「不支持图片输入」，消息不会发出去。怎么告诉 dsh 一个模型能看图，见下一节。
 
-## 模块
+## 换成别的模型
 
-仓库是 pnpm monorepo。根目录是 bundle `deepseek-harness-tui`，`cordis.patch.yml` 为每个插件包插入一行 `tui-*`。插件之间不互相 import，只通过 `ctx` 服务和 `tui/*` 事件协作：
+临时换：在输入框里用 `/model`。
 
-| 包 | 行 id | 职责 | 提供 / 依赖 |
-|---|---|---|---|
-| `@dsh-tui/render` | — | 纯函数库：opencode 色板和语法高亮规则、工具标题、路径/时长/diff 等格式化 | 不依赖 dsh 和 OpenTUI |
-| `@dsh-tui/ui` | — | OpenTUI 组件库：唯一 import `@opentui/core` 的包，提供竖线块、带样式文本、spinner、面板外框、列表 | 依赖 `@opentui/core` |
-| `@dsh-tui/console` | `tui-console` | 全屏宿主：对话区、输入框、状态栏、面板、命令补全；把输入转成 `tui/submit`、`tui/interrupt`、`tui/close`、`tui/toggle-thinking` 事件 | 提供 `tuiConsole` |
-| `@dsh-tui/chat` | `tui-chat` | 会话控制：创建 Agent、分派输入、等待 Agent 和子 agent 空闲、保存会话、退出 | 提供 `tuiChat`；依赖 `tuiConsole` |
-| `@dsh-tui/transcript` | `tui-transcript` | 渲染当前 Agent 的消息、思考、工具调用和回合脚注 | 依赖 `tuiConsole`、`tuiChat` |
-| `@dsh-tui/interaction` | `tui-interaction` | 审批和提问面板，回答所有 agent（含子 agent）的 `approval/request` 和 `user-questions/request` | 依赖 `tuiConsole` |
-| `@dsh-tui/commands` | `tui-commands` | 斜杠命令注册表、`/` 补全和内置命令 | 提供 `tuiCommands`；依赖 `tuiConsole`、`tuiChat` |
+长期换，或者接入自己的模型服务（任何兼容 OpenAI 或 Anthropic 接口的服务都行），编辑 `~/.dsh/profiles/tui/cordis.patch.yml`。下面是一个例子，按你的服务改名字、地址和模型：
 
-扩展方式：
+```yaml
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      my-gateway:
+        displayName: My Gateway
+        api: openai-completions        # 也可以是 openai-responses 或 anthropic-messages
+        baseURL: https://api.example.com/v1
+        apiKeyEnv: MY_GATEWAY_KEY      # key 写进 ~/.dsh/.env：MY_GATEWAY_KEY=...
+        models:
+          - { id: some-model, contextWindow: 200000, maxTokens: 32000, input: [text, image] }
 
-- 在 `~/.dsh/profiles/tui/cordis.patch.yml` 里写 `- id: tui-interaction` 加 `disabled: true` 可以禁用某一行，也可以插入一个提供同名服务的插件来替换它。
-- 新插件可以注册自己的斜杠命令：`ctx.effect(() => ctx.tuiCommands.register({ name, help: [[语法, 说明]], run }))`，它会自动出现在 `/help` 和 `/` 补全里。
-- bundle 关闭了 HMR，避免配置热重载把对话中的 TUI 重新挂载。
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: my-gateway
+    model: some-model
+```
+
+`input: [text, image]` 表示这个模型能看图，不写就只能发文字。改完重启 `dshcli` 生效。
+
+## 遇到问题
+
+| 看到的提示 | 怎么办 |
+|---|---|
+| `dshcli: no deepseek-harness checkout at …` | dsh 不在本仓库的同级目录。把两个仓库放到同一个父目录，或者运行前设置 `DSH_REPO=/dsh的路径` |
+| `dshcli: workspace packages are not linked` | 在本仓库目录里执行 `pnpm install` |
+| `dshcli: no Node.js with node:ffi found` | 当前的 Node 不带 FFI，回到第 1 步。也可以用 `DSH_TUI_NODE=/某个/node` 指定 |
+| `the tui profile needs an interactive terminal` | 要在真正的终端里运行，不能接管道或重定向 |
+| 发消息后报 `MISSING_CREDENTIAL` | 没配 API key，回到第 5 步 |
+| `/model` 列表里没有某个模型 | 那个服务的 key 没配上，或者配置文件里没写这个模型 |
+
+dsh 运行时往 stderr 输出的信息不会弄乱界面，状态栏会显示「⚠ N 条诊断」，退出后再打印出来。
 
 ## 已知限制
 
-- 依赖实验性的 `node:ffi`，必须用带 FFI 的 Node 并加 `--experimental-ffi` 启动；npm 安装的 dsh 默认不带这个参数。
-- 全屏模式下终端自己的滚动历史里没有对话内容，退出后也不会留下；要看完整记录请用 `dsh web` 打开会话。
-- 中文输入法还没在真实终端里验证过（自动化测试只能逐字写入）。
-- 代码高亮只支持 OpenTUI 内置的 javascript、typescript、markdown、zig；其他语言按普通文本显示。
-- edit/write 的 diff 行号从每个改动块的第一行算起，所以不显示行号。
-- 中断回合时 dsh 会清空排队的消息，这些消息会标为「已取消，未发送」。
-- 不能恢复历史会话（只有 `/new`）；会话可以在 `dsh web` 里继续。`/model` 只改当前会话，不写回默认模型。
-- 依赖 dsh 尚未稳定的内部接口（`agents.create`、`agent/assistant-stream`、审批和提问的 waterfall），`engines.dsh` 限定在 `>=0.2.1-rc.3 <0.3.0`；dsh 升级后可能需要跟着改。
+- 依赖 Node 的实验特性 `node:ffi`，以后 Node 或 OpenTUI 升级可能要跟着改。
+- 全屏界面不会把对话留在终端的滚动记录里。想回看完整对话，用 dsh 的网页版（在 dsh 目录执行 `pnpm dsh web`）。
+- 还不能恢复之前的会话，只能 `/new` 开新的；旧会话可以在网页版里继续。
+- 代码高亮只支持 JavaScript、TypeScript、Markdown 和 Zig，其他语言显示成普通文字。
+- 打断一轮对话时，排在后面的消息也会一起取消，界面上会标「已取消，未发送」。
+- 中文输入法还没在多种终端里试过，遇到问题欢迎提 issue。
+
+## 开发
+
+代码在 `packages/` 下，每个子目录一个包：
+
+- `console`：全屏界面的骨架，管输入框、状态栏、弹出面板和粘贴。
+- `chat`：管和 agent 的对话：发消息、等回复、退出时保存。
+- `transcript`：把 agent 的输出画成对话里的各种块。
+- `interaction`：权限确认和提问面板。
+- `commands`：`/` 命令。
+- `ui`：对 OpenTUI 的一层封装，只有它直接用 OpenTUI。
+- `render`：配色、工具标题这类不涉及界面的小函数。
+
+改完代码重启 `dshcli` 就能看到效果，`pnpm check` 做语法检查。更多实现细节和约定写在 `CLAUDE.md` 里。
+
+## 致谢
+
+界面设计、配色和语法高亮规则来自 [opencode](https://github.com/anomalyco/opencode)（MIT）。界面用 [OpenTUI](https://opentui.com) 绘制。
