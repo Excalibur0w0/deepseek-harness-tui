@@ -78,6 +78,7 @@ export function currentPalette() {
 const SYNTAX_RULES = [
   [['default'], 'text', ''],
   [['prompt'], 'accent', ''],
+  [['extmark.paste'], 'background', 'b', 'warning'],
   [['comment'], 'syntaxComment', 'i'],
   [['comment.documentation'], 'syntaxComment', 'i'],
   [['string', 'symbol'], 'syntaxString', ''],
@@ -350,6 +351,43 @@ export function unifiedDiff(meta) {
   }
   if (body.length === 0) return undefined
   return { path, diff: [`--- a/${path}`, `+++ b/${path}`, ...body].join('\n') }
+}
+
+/** Image media types dsh's attachment service admits, by file extension. */
+const IMAGE_MEDIA_TYPES = Object.freeze({
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+})
+
+/**
+ * @param {string} path - file path.
+ * @returns {'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif' | undefined} the image media type its extension names.
+ */
+export function imageMediaType(path) {
+  const extension = /\.([^./]+)$/.exec(path)?.[1]?.toLowerCase()
+  return extension === undefined ? undefined : IMAGE_MEDIA_TYPES[extension]
+}
+
+/**
+ * Turn pasted text that may be a dropped file into a path, as opencode does:
+ * strip surrounding quotes, decode a `file://` URL, and undo shell escaping.
+ * @param {string} text - trimmed pasted text.
+ * @returns {string} the candidate path.
+ */
+export function pastedPath(text) {
+  const raw = text.replace(/^['"]+|['"]+$/g, '')
+  if (raw.startsWith('file://')) {
+    try {
+      return decodeURIComponent(new URL(raw).pathname)
+    } catch {
+      // A malformed file URL is not a path; keep the text as typed.
+      return raw
+    }
+  }
+  return process.platform === 'win32' ? raw : raw.replace(/\\(.)/g, '$1')
 }
 
 /**

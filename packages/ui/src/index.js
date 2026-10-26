@@ -18,6 +18,7 @@ import {
   TextareaRenderable,
   TextRenderable,
   createCliRenderer,
+  decodePasteBytes,
 } from '@opentui/core'
 import { syntaxRules } from '@dsh-tui/render'
 
@@ -29,6 +30,7 @@ export {
   TextareaRenderable,
   TextRenderable,
   createCliRenderer,
+  decodePasteBytes,
 }
 
 /** Border characters that draw nothing; spread and override one side. */

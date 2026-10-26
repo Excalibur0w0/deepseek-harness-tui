@@ -2,8 +2,10 @@
  * @dsh-tui/chat — the conversation controller. It creates one Agent through
  * the core registry, routes terminal input to the Agent or to slash commands,
  * waits for each run to settle as the headless runner does, and saves the
- * Session on exit. It provides `ctx.tuiChat` and emits `tui/queued` (text)
- * when a message is queued behind a running turn.
+ * Session on exit. Prompts with pasted images are admitted through
+ * `ctx.attachments` first, as dsh's Web session controller does. It provides
+ * `ctx.tuiChat` and emits `tui/queued` (text, image count) when a message is
+ * queued behind a running turn.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -31,7 +33,7 @@ export function apply(ctx) {
   }
   const chat = new TuiChat(ctx, exit)
   ctx.effect(() => () => { chat.closing = true }, 'tui chat')
-  ctx.on('tui/submit', line => chat.onSubmit(line))
+  ctx.on('tui/submit', (line, parts) => chat.onSubmit(line, parts))
   ctx.on('tui/interrupt', key => chat.onInterrupt(key))
   ctx.on('tui/close', () => { void chat.quit(0) })
   ctx.provide('tuiChat', chat)
@@ -53,6 +55,8 @@ class TuiChat {
     this.running = false
     this.closing = false
     this.lastInterrupt = 0
+    /** Orders message admission so queued prompts keep their submission order. */
+    this.admissions = Promise.resolve()
   }
 
   async start() {
@@ -118,20 +122,59 @@ class TuiChat {
 
   // ── input ───────────────────────────────────────────────────────────────
 
-  onSubmit(line) {
+  /**
+   * @param {string} line - the prompt text, image placeholders included.
+   * @param {Array<{ type: 'text', text: string } | { type: 'image', mediaType: string, data: string, name?: string }>} [parts] - ordered text and encoded images.
+   */
+  onSubmit(line, parts = [{ type: 'text', text: line.trim() }]) {
     const text = line.trim()
-    if (this.running) {
-      if (text === '') return
-      this.agent.followup(this.userMessage(text))
-      this.ctx.emit('tui/queued', text)
-      return
-    }
-    if (text === '') return
-    if (text.startsWith('/')) {
+    const images = parts.filter(part => part.type === 'image').length
+    if (text === '' && images === 0) return
+    if (!this.running && images === 0 && text.startsWith('/')) {
       void this.command(text)
       return
     }
-    void this.send(text)
+    const admitted = this.admissions.then(() => this.buildMessage(parts, images))
+    this.admissions = admitted.catch(() => undefined)
+    void admitted.then(
+      message => this.deliver(message, parts, images),
+      error => { this.terminal.note(`未发送：${errorMessage(error)}`, 'error') },
+    )
+  }
+
+  /**
+   * Send the message, or queue it behind the running turn.
+   * @param {import('@deepseek-ai/dsh-llm').UserMessage} message - the admitted message.
+   * @param {Array<{ type: string, text?: string }>} parts - the prompt parts, for the queued display.
+   * @param {number} images - how many images the message carries.
+   */
+  async deliver(message, parts, images) {
+    if (this.closing) return
+    if (this.running) {
+      this.agent.followup(message)
+      const text = parts.filter(part => part.type === 'text').map(part => part.text).join('\n\n')
+      this.ctx.emit('tui/queued', text, images)
+      return
+    }
+    await this.send(message)
+  }
+
+  /**
+   * Build the user message; images are stored through `ctx.attachments` and
+   * refused for a model that declares no image input.
+   * @returns {Promise<import('@deepseek-ai/dsh-llm').UserMessage>} the message.
+   */
+  async buildMessage(parts, images) {
+    if (images === 0) return createUserMessage({ content: parts, source: { kind: 'user' } })
+    const { provider, model } = this.currentModel()
+    const info = await this.ctx.get('llm')?.resolveModelInfo(provider, model)
+    if (info?.inputModalities !== undefined && !info.inputModalities.includes('image')) {
+      throw new Error(`模型 ${model} 不支持图片输入`)
+    }
+    const attachments = this.ctx.get('attachments')
+    if (attachments === undefined) throw new Error('附件服务不可用')
+    const content = await attachments.admitPromptContent(parts)
+    return createUserMessage({ content, source: { kind: 'user' } })
   }
 
   /**
@@ -164,16 +207,15 @@ class TuiChat {
     this.prompt()
   }
 
-  userMessage(text) {
-    return createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
-  }
-
-  async send(text) {
+  /**
+   * @param {import('@deepseek-ai/dsh-llm').UserMessage} message - the message to send.
+   */
+  async send(message) {
     const agent = this.agent
     this.running = true
     this.terminal.setBusy(true)
     try {
-      agent.followup(this.userMessage(text))
+      agent.followup(message)
       await this.waitForQuiescence(agent)
       await this.ctx.get('sessions').flush(agent.session)
     } catch (error) {

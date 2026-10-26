@@ -80,11 +80,20 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"
 | Esc | 运行中中断当前回合 |
 | Ctrl-C | 有选中文字时复制；运行中中断；空闲时清空输入，连按两次退出 |
 | Ctrl-D | 输入为空时退出 |
+| Ctrl-V | 粘贴剪贴板里的图片（插入 `[图片 N]` 占位）或文字 |
 | ↑ / ↓ | 翻看输入历史 |
 | PgUp / PgDn、鼠标滚轮 | 滚动对话 |
 | Ctrl-T | 展开或折叠思考过程 |
 
 用鼠标拖选对话中的文字，松开即复制（OSC 52，macOS 上同时走 `pbcopy`）。
+
+### 图片
+
+和 opencode 一样，按 Ctrl-V 时如果剪贴板里是图片，输入框会插入一个高亮的 `[图片 N]` 占位，退格可以整块删掉；把图片文件（png、jpg、webp、gif）拖进终端也一样。发送时图片按占位的位置和文字一起组成消息，先存进 dsh 的附件存储，消息里只记录引用；对话里的用户消息下方会显示 ` 图片 ` 和尺寸。
+
+读取剪贴板用的是系统工具：macOS 用 `osascript`，Linux 用 `wl-paste` 或 `xclip`，Windows 用 PowerShell。
+
+模型要在配置里声明支持图片输入，图片才会发出去；没有声明的模型会拒绝发送并提示「不支持图片输入」。`llm-pi-ai` 里自定义的模型默认只有文本输入，可以在模型条目上写 `input: [text, image]`，或者在 provider 上写 `defaultInput: [text, image]`。
 
 ### 审批和提问
 

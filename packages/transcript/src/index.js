@@ -38,7 +38,7 @@ export function apply(ctx) {
   ctx.on('agent/error', ({ agent, error }) => {
     if (view.follows(agent)) view.errorBlock(errorMessage(error))
   })
-  ctx.on('tui/queued', message => { if (view.follows(view.chat.agent)) view.queued(message) })
+  ctx.on('tui/queued', (message, images) => { if (view.follows(view.chat.agent)) view.queued(message, images) })
   ctx.on('tui/approval', (callId, outcome) => view.approvalSettled(callId, outcome))
   ctx.on('tui/toggle-thinking', () => view.toggleThinking())
 }
@@ -245,7 +245,7 @@ class Transcript {
       case 'user/message': {
         const message = event.data
         if (message.source?.kind !== 'user') return
-        this.userMessage(messageText(message))
+        this.userMessage(messageText(message), messageImages(message))
         return
       }
       case 'turn/start':
@@ -268,10 +268,11 @@ class Transcript {
 
   /**
    * @param {string} message - the user's text.
+   * @param {Array<{ width?: number, height?: number }>} images - the message's images, shown as opencode's attachment badges.
    * @param {boolean} [queued] - whether it waits behind the running turn.
    * @returns {{ block: import('@opentui/core').Renderable, badge?: import('@opentui/core').TextRenderable }} the message block and its queued badge.
    */
-  userBlock(message, queued = false) {
+  userBlock(message, images, queued = false) {
     const palette = this.palette
     let badge
     const block = this.add(marginTop => {
@@ -285,7 +286,14 @@ class Transcript {
         paddingRight: 2,
         backgroundColor: palette.backgroundPanel,
       })
-      inner.add(text(this.renderer, message, { fg: palette.text }))
+      if (message !== '') inner.add(text(this.renderer, message, { fg: palette.text }))
+      if (images.length > 0) {
+        inner.add(text(this.renderer, spans(...images.flatMap((image, index) => [
+          index > 0 && ' ',
+          { text: ' 图片 ', bg: palette.secondary, fg: palette.background },
+          { text: ` ${image.width === undefined ? index + 1 : `${image.width}×${image.height}`} `, bg: palette.backgroundElement, fg: palette.textMuted },
+        ])), { marginTop: message === '' ? 0 : 1 }))
+      }
       if (queued) {
         badge = text(this.renderer, spans({ text: ' 排队中 ', bg: palette.secondary, fg: palette.background, bold: true }), { marginTop: 1 })
         inner.add(badge)
@@ -296,16 +304,20 @@ class Transcript {
     return { block, badge }
   }
 
-  userMessage(message) {
+  userMessage(message, images) {
     this.endText()
     this.endReasoning()
-    const index = this.pending.findIndex(item => item.message === message)
+    const index = this.pending.findIndex(item => item.message === message && item.images === images.length)
     if (index !== -1) discard(this.pending.splice(index, 1)[0].block)
-    this.userBlock(message)
+    this.userBlock(message, images)
   }
 
-  queued(message) {
-    this.pending.push({ message, ...this.userBlock(message, true) })
+  /**
+   * @param {string} message - the queued text.
+   * @param {number} [images] - how many images it carries; their sizes are known only once stored.
+   */
+  queued(message, images = 0) {
+    this.pending.push({ message, images, ...this.userBlock(message, Array.from({ length: images }, () => ({})), true) })
   }
 
   toolCall({ callId, name, arguments: args }) {
@@ -508,6 +520,16 @@ class Transcript {
 function messageText(message) {
   const blocks = Array.isArray(message.content) ? message.content : []
   return blocks.filter(block => block.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n\n')
+}
+
+/**
+ * @param {{ content?: ReadonlyArray<{ type: string, attachment?: { width: number, height: number } }> }} message - a user message.
+ * @returns {Array<{ width: number, height: number }>} its stored images' dimensions, in order.
+ */
+function messageImages(message) {
+  const blocks = Array.isArray(message.content) ? message.content : []
+  return blocks.filter(block => block.type === 'image' && block.attachment !== undefined)
+    .map(block => ({ width: block.attachment.width, height: block.attachment.height }))
 }
 
 /**

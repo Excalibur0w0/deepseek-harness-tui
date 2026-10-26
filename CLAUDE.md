@@ -34,6 +34,7 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
      - 以状态栏的「发送」判断就绪，以回合脚注的 `▣` 判断回合结束，以「需要确认」「enter 确认」判断面板出现。
   2. 再用 `@xterm/headless`（dsh 的 pnpm store 里有 6.0.0）把录下的字节回放成屏幕文本来检查。查看时保留空行，否则看不出块之间的间距。
 - 交互验证会调用真实模型，先确认 tui profile 配置的模型服务可用。本机的模型服务、网关和注意事项写在不入库的 `CLAUDE.local.md` 里。
+- 测图片：用括号粘贴（`\x1b[200~路径\x1b[201~`）模拟把文件拖进终端，不用动系统剪贴板。要让图片真正发出去，需要一个声明了图片输入的模型；可以用 `--patch` 叠加一份只改了 `defaultInput` 的 `llm-pi-ai` 行，不改用户的 profile。测 Ctrl+V 会改用户的系统剪贴板，先备份剪贴板内容，测完恢复。
 - 测审批时选一个会被 workspace-write 沙箱拦下的操作，例如写 `~` 下的文件（`/tmp` 可写，不会触发审批），并选「拒绝」。测提问让模型调用 `ask_user_question`。每次验证都会在 `~/.dsh/sessions` 留下会话。
 - 中文输入法、鼠标滚动和复制在 pty 里测不了，要请用户在真实终端里试。
 
@@ -64,14 +65,20 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
     - 输入框和状态栏：`setMeta()`、`setBusy()`、`flashStatus()`、`setCompletionProvider()`
     - 面板：`runPanel(build, signal)`，以及串行化所有面板的 `exclusive(task)`
   - stderr：渲染器运行期间截获 `process.stderr.write`，状态栏显示条数，`close()` 销毁渲染器后再写回。
+  - 图片（照 opencode `component/prompt/index.tsx` 的 `pasteAttachment` 和 `clipboard.ts`）：
+    - 入口：Ctrl+V 由 `src/clipboard.js` 读系统剪贴板；括号粘贴为空时也读剪贴板；粘贴的文本是单个图片文件路径时读取该文件。
+    - 占位：插入 `[图片 N]`，用 `image` 类型、`extmark.paste` 样式的 virtual extmark 标记，退格整块删除。OpenTUI 的 extmark 偏移和 `cursorOffset` 都按显示列计算，中文占 2 列，所以结束位置靠插入前后读 `cursorOffset` 得到，不能用 `label.length`；提交时按占位文本在 `plainText` 里查找切分，不做列和下标的换算。
+    - 提交：`tui/submit` 带上 `(text, parts)`，`parts` 是按顺序排列的 `{ type: 'text', text }` 和 `{ type: 'image', mediaType, data(base64), name }`。
 - `packages/chat`（`tuiChat`）：唯一 import dsh 运行时的包。
   - 启动：`start()` 先 `await ctx.get('loader')?.await()`，再创建 Agent、`await console.open()`、设置模型行。
   - 发送：`agent.followup(createUserMessage(...))`，然后循环 `agent.whenIdle()` + `subagents.waitForChildren()`，直到 Agent 和子 agent 都空闲（与 `dsh-headless` 相同），结束后 `sessions.flush()`。
+  - 组装消息：没有图片时直接 `createUserMessage`；有图片时照 dsh Web 的 `session-controller` 的做法，先用 `ctx.llm.resolveModelInfo()` 检查 `inputModalities` 含 `image`，再用 `ctx.attachments.admitPromptContent(parts)` 把图片存成持久附件、换成引用，然后建消息。组装经 `admissions` 串行，排队的消息保持提交顺序。
   - 输入路由：运行中回车排队 followup；Esc/Ctrl-C 调 `agent.cancel({ kind: 'user' })`，这会同时清空排队的消息。空闲时 `/` 开头交给 `tuiCommands.execute()`，其余作为消息发送。
   - 退出：`quit()` 取消运行中的回合、flush、`await console.close()`，回到主屏后打印「会话已保存」，再调 `ctx.appExit(code)`。
 - `packages/transcript`：只渲染 `tuiChat.agent` 的输出，部件对应 opencode `routes/session/index.tsx` 的 `UserMessage`、`ReasoningPart`、`TextPart`、`InlineTool`、`BlockTool`、`AssistantMessage` 脚注。
   - 数据来源：正文和思考来自进程内的 `agent/assistant-stream`（逐字增量只在进程内广播，SDK 和官方 ACP 都拿不到）；用户消息、工具调用和结果、回合起止来自持久化的 `session/event`（`tool/result` 只渲染 `surfaceOp === 'append'`）。
   - 间距：连续的行内工具行之间不空行，其余部件之间空一行。
+  - 用户消息里的图片块（`{ type: 'image', attachment }`）画成 ` 图片 ` 加尺寸的徽标；排队中的消息还没存储，只显示序号。
 - `packages/interaction`：`approval/request` 和 `user-questions/request` 都是 waterfall。
   - 它是 profile 里唯一的终端答题者，回答所有 agent（包括子 agent）的请求；TUI 关闭或 `tuiChat.closing` 后必须 `return next()`。
   - 它自己记录所有 session 的 `tool/call`，审批面板据此显示要批准的工具行。
@@ -102,6 +109,8 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
   - `packages/llm/llm/src/types.ts`：`StreamChunk`
   - `packages/core/session/src/types.ts`：`SessionEventMap`、`TurnEndReason`
   - `packages/fs/tool-fs/src/diff.ts`：write/edit 结果 `meta.diffs` 的格式
+  - `packages/attachment/attachment/src/types.ts`、`docs/subsystems/attachment.md`：`admitPromptContent` 的输入输出、支持的图片类型和大小限制
+  - `packages/api/session-controller/src/commands.ts` 的 `prompt()`：带图片的消息怎么检查模型和组装
   - `packages/interaction/user-approval/src/types.ts`、`packages/interaction/user-questions/src/types.ts`
   - `docs/tool-catalog.md`：各工具的参数名（`toolView` 用到）
 - 界面照 opencode 源码（[anomalyco/opencode](https://github.com/anomalyco/opencode) 的 `packages/tui/src`，本机副本的位置见 `CLAUDE.local.md`）：

@@ -2,14 +2,19 @@
  * @dsh-tui/console — owns the terminal for the TUI as a full-screen OpenTUI
  * app laid out like opencode's session view: a scrolling transcript, the
  * prompt box with its model line, and a status row. It provides
- * `ctx.tuiConsole` and reports input as Cordis events: `tui/submit` (a
- * line), `tui/interrupt` (`'ctrl-c'` or `'escape'`), `tui/close` (Ctrl-D on
- * an empty prompt), and `tui/toggle-thinking` (Ctrl-T). While a panel is
- * open, every key goes to the panel instead.
+ * `ctx.tuiConsole` and reports input as Cordis events: `tui/submit` (the
+ * prompt text and its ordered text and image parts), `tui/interrupt`
+ * (`'ctrl-c'` or `'escape'`), `tui/close` (Ctrl-D on an empty prompt), and
+ * `tui/toggle-thinking` (Ctrl-T). Ctrl+V and dropped image files attach
+ * images as `[图片 N]` placeholders, as opencode does. While a panel is open,
+ * every key goes to the panel instead.
  */
 
 import { spawn } from 'node:child_process'
-import { currentPalette } from '@dsh-tui/render'
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
+import { currentPalette, errorMessage, imageMediaType, pastedPath } from '@dsh-tui/render'
 import {
   BoxRenderable,
   EMPTY_BORDER,
@@ -19,11 +24,13 @@ import {
   TextareaRenderable,
   createCliRenderer,
   createSyntaxStyles,
+  decodePasteBytes,
   discard,
   keyHints,
   spans,
   text,
 } from '@dsh-tui/ui'
+import { readClipboardImage, readClipboardText } from './clipboard.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-console'
@@ -85,6 +92,9 @@ class TuiConsole {
     this.completionProvider = undefined
     this.completions = []
     this.completionIndex = 0
+    /** Pasted images by placeholder extmark id, until the prompt is submitted or cleared. */
+    this.images = new Map()
+    this.imageCount = 0
     this.history = []
     /** Position while recalling history; `history.length` means the draft. */
     this.historyIndex = 0
@@ -228,9 +238,13 @@ class TuiConsole {
         { name: 'return', meta: true, action: 'newline' },
         { name: 'j', ctrl: true, action: 'newline' },
       ],
+      syntaxStyle: this.syntax,
       onSubmit: () => this.submit(),
       onContentChange: () => this.updateCompletions(),
+      onPaste: event => this.onPaste(event),
     })
+    this.imageType = this.input.extmarks.registerType('image')
+    this.imageStyle = this.syntax.getStyleId('extmark.paste') ?? undefined
     inner.add(this.input)
     this.metaText = text(renderer, '', { marginTop: 1, wrapMode: 'none', truncate: true })
     inner.add(this.metaText)
@@ -328,10 +342,17 @@ class TuiConsole {
     return this.input !== undefined && this.input.plainText !== ''
   }
 
-  /** Clear the prompt. */
+  /** Clear the prompt and its pasted images. */
   clearInput() {
     this.input?.setText('')
+    this.forgetImages()
     this.historyIndex = this.history.length
+  }
+
+  forgetImages() {
+    this.input?.extmarks.clear()
+    this.images.clear()
+    this.imageCount = 0
   }
 
   /**
@@ -349,14 +370,123 @@ class TuiConsole {
 
   submit() {
     const value = this.input.plainText
-    if (value.trim() !== '' && this.history.at(-1) !== value) {
-      this.history.push(value)
+    const parts = this.promptParts(value)
+    // History recalls text only; pasted images are not kept after sending.
+    const recalled = parts.filter(part => part.type === 'text').map(part => part.text).join(' ')
+    if (recalled !== '' && this.history.at(-1) !== recalled) {
+      this.history.push(recalled)
       if (this.history.length > HISTORY_LIMIT) this.history.shift()
     }
     this.historyIndex = this.history.length
     this.input.setText('')
+    this.forgetImages()
     this.hideCompletions()
-    this.ctx.emit('tui/submit', value)
+    this.ctx.emit('tui/submit', value, parts)
+  }
+
+  /**
+   * Split the prompt at each image placeholder that is still intact.
+   * Placeholders are found by their text: OpenTUI measures extmark offsets
+   * in display columns, which differ from string indices for CJK text.
+   * @param {string} value - the prompt text.
+   * @returns {Array<{ type: 'text', text: string } | { type: 'image', mediaType: string, data: string, name?: string }>} trimmed text and encoded images in prompt order.
+   */
+  promptParts(value) {
+    const found = this.input.extmarks.getAllForTypeId(this.imageType)
+      .map(mark => this.images.get(mark.id))
+      .filter(image => image !== undefined)
+      .map(image => ({ image, index: value.indexOf(image.label) }))
+      .filter(item => item.index !== -1)
+      .sort((left, right) => left.index - right.index)
+    const parts = []
+    const pushText = segment => {
+      const trimmed = segment.trim()
+      if (trimmed !== '') parts.push({ type: 'text', text: trimmed })
+    }
+    let cursor = 0
+    for (const { image, index } of found) {
+      pushText(value.slice(cursor, index))
+      parts.push({ type: 'image', mediaType: image.mediaType, data: image.data, ...image.name === undefined ? {} : { name: image.name } })
+      cursor = index + image.label.length
+    }
+    pushText(value.slice(cursor))
+    return parts
+  }
+
+  // ── paste ───────────────────────────────────────────────────────────────
+
+  /**
+   * Insert an image placeholder at the cursor and keep the image for submit.
+   * @param {Buffer} data - encoded image bytes.
+   * @param {string} mediaType - the image media type.
+   * @param {string} [name] - display name, such as the dropped file's base name.
+   */
+  attachImage(data, mediaType, name) {
+    this.imageCount += 1
+    const label = `[图片 ${this.imageCount}]`
+    const start = this.input.cursorOffset
+    this.input.insertText(label)
+    // Offsets are display columns, so measure the label through the cursor.
+    const end = this.input.cursorOffset
+    this.input.insertText(' ')
+    const id = this.input.extmarks.create({ start, end, virtual: true, styleId: this.imageStyle, typeId: this.imageType })
+    this.images.set(id, { label, mediaType, data: data.toString('base64'), ...name === undefined ? {} : { name } })
+  }
+
+  /**
+   * Attach an image file when `text` names one, as when a file is dropped onto the terminal.
+   * @param {string} text - pasted text.
+   * @returns {Promise<boolean>} whether `text` named an image file that was attached.
+   */
+  async attachImageFile(text) {
+    const trimmed = text.trim()
+    if (trimmed === '' || trimmed.includes('\n')) return false
+    const path = pastedPath(trimmed)
+    const mediaType = imageMediaType(path)
+    if (mediaType === undefined || !existsSync(path)) return false
+    try {
+      this.attachImage(await readFile(path), mediaType, basename(path))
+      return true
+    } catch (error) {
+      this.flashStatus(`读取图片失败：${errorMessage(error)}`, 'warning')
+      return true
+    }
+  }
+
+  /**
+   * Bracketed paste: an empty paste may be an image-only clipboard, and a
+   * single image path is attached; other text is inserted as usual.
+   * @param {import('@opentui/core').PasteEvent} event - the paste event.
+   */
+  onPaste(event) {
+    const pasted = decodePasteBytes(event.bytes)
+    const trimmed = pasted.trim()
+    if (trimmed === '') {
+      event.preventDefault()
+      void this.pasteClipboard()
+      return
+    }
+    const path = pastedPath(trimmed)
+    if (trimmed.includes('\n') || imageMediaType(path) === undefined || !existsSync(path)) return
+    event.preventDefault()
+    void this.attachImageFile(trimmed)
+  }
+
+  /** Ctrl+V: paste the clipboard image, or its text when it holds no image. */
+  async pasteClipboard() {
+    const image = await readClipboardImage()
+    if (!this.isOpen || this.panel !== undefined) return
+    if (image !== undefined) {
+      this.attachImage(image, 'image/png', 'clipboard.png')
+      return
+    }
+    const pasted = await readClipboardText()
+    if (pasted === undefined || !this.isOpen || this.panel !== undefined) {
+      if (pasted === undefined) this.flashStatus('剪贴板里没有图片或文字', 'textMuted')
+      return
+    }
+    if (await this.attachImageFile(pasted)) return
+    this.input.insertText(pasted.replace(/\r\n?/g, '\n'))
   }
 
   renderMeta() {
@@ -477,6 +607,11 @@ class TuiConsole {
     if (key.ctrl && name === 't') {
       key.preventDefault()
       this.ctx.emit('tui/toggle-thinking')
+      return
+    }
+    if (key.ctrl && name === 'v') {
+      key.preventDefault()
+      void this.pasteClipboard()
       return
     }
     if (name === 'pageup' || name === 'pagedown') {
