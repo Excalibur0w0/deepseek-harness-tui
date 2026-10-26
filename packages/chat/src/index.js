@@ -131,15 +131,55 @@ class TuiChat {
     const images = parts.filter(part => part.type === 'image').length
     if (text === '' && images === 0) return
     if (!this.running && images === 0 && text.startsWith('/')) {
-      void this.command(text)
+      void this.slash(text, parts)
       return
     }
+    this.submit(parts, images)
+  }
+
+  /**
+   * Queue one message; admissions keep submission order while images are stored.
+   * @param {Array<object>} parts - ordered text and encoded images.
+   * @param {number} images - how many of `parts` are images.
+   */
+  submit(parts, images) {
     const admitted = this.admissions.then(() => this.buildMessage(parts, images))
     this.admissions = admitted.catch(() => undefined)
     void admitted.then(
       message => this.deliver(message, parts, images),
       error => { this.terminal.note(`未发送：${errorMessage(error)}`, 'error') },
     )
+  }
+
+  /**
+   * A `/name` line runs a TUI command. When no command has that name but a
+   * user-invocable skill does, the line goes to the Agent as a message and dsh
+   * injects the skill — the only entry to `disable-model-invocation` skills.
+   * @param {string} text - the trimmed line, starting with `/`.
+   * @param {Array<object>} parts - the line's parts, for sending it as a message.
+   */
+  async slash(text, parts) {
+    const name = text.slice(1).split(/\s+/, 1)[0]
+    const commands = this.ctx.get('tuiCommands')?.list() ?? []
+    const isCommand = commands.some(command => command.name === name || command.aliases?.includes(name))
+    if (!isCommand && await this.userSkill(name)) this.submit(parts, 0)
+    else await this.command(text)
+  }
+
+  /**
+   * @param {string} name - a skill name typed after `/`.
+   * @returns {Promise<boolean>} whether the current Agent's workspace has a user-invocable skill by that name.
+   */
+  async userSkill(name) {
+    const skills = this.ctx.get('skills')
+    if (skills === undefined || name === '') return false
+    try {
+      const skill = await skills.get(name, { cwd: this.cwd, scope: this.agent })
+      return skill?.invocation?.userInvocable === true
+    } catch {
+      // Invalid names and unavailable sources are not skills; the line stays a command.
+      return false
+    }
   }
 
   /**

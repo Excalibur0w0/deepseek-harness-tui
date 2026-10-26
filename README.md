@@ -162,6 +162,8 @@ dshcli
 | `/session` | 看当前会话的 id、模型和目录 |
 | `/exit` | 保存并退出 |
 
+不是上面这些命令、但正好是某个 skill 的名字时（例如 [agent-master](https://github.com/Excalibur0w0/agent-master) 的 `am install` 装的 `/am`），整行会作为消息发给 agent，由 dsh 把这个 skill 的说明一起交给模型。只能这样调用的 skill（`disable-model-invocation: true`）也能用。
+
 ### 确认权限
 
 agent 要做超出当前目录的事（比如往家目录写文件），输入框会换成一个黄色的「△ 需要确认」面板。左右键在「允许一次」和「拒绝」之间切换，回车确认；也可以直接按 `y` 允许、`n` 或 Esc 拒绝。
