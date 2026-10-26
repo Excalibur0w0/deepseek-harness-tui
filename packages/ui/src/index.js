@@ -365,11 +365,12 @@ export class TextField {
  * @param {SelectItem[]} options.items - rows.
  * @param {number} [options.initial] - row highlighted first.
  * @param {boolean} [options.filterable] - typing narrows the rows.
- * @param {boolean} [options.multi] - Space checks rows and Enter returns every checked value.
+ * @param {boolean} [options.multi] - Space checks rows, Ctrl-A checks or clears every shown row, and Enter returns every checked value.
+ * @param {(value: unknown) => boolean} [options.checked] - rows checked when the panel opens, for `multi`.
  * @param {number} [options.rows] - rows visible at once.
  * @returns {Promise<unknown>} the chosen value (an array when `multi`), or undefined when cancelled.
  */
-export function selectPanel(terminal, { title, lines = [], items, initial = 0, filterable = false, multi = false, rows = 10 }) {
+export function selectPanel(terminal, { title, lines = [], items, initial = 0, filterable = false, multi = false, checked: isChecked = () => false, rows = 10 }) {
   const { renderer, palette } = terminal
   return terminal.runPanel(done => {
     const { root, body, footer } = panelFrame(renderer, palette, palette.secondary)
@@ -379,21 +380,24 @@ export function selectPanel(terminal, { title, lines = [], items, initial = 0, f
     if (filterLine !== undefined) body.add(filterLine)
     const list = new ListView(renderer, palette, rows)
     body.add(list.renderable)
+    const countLine = multi ? text(renderer, '', { fg: palette.textMuted }) : undefined
+    if (countLine !== undefined) body.add(countLine)
     footer.add(text(renderer, spans(...keyHints(palette, [
       ...filterable ? [['输入', '过滤']] : [],
       ['↑↓', '选择'],
-      ...multi ? [['space', '勾选']] : [],
+      ...multi ? [['space', '勾选'], ['ctrl+a', '全选']] : [],
       ['enter', '确认'],
       ['esc', '取消'],
     ])), { wrapMode: 'none' }))
     const field = new TextField()
-    const checked = new Set()
+    const checked = new Set(multi ? items.filter(item => isChecked(item.value)) : [])
     let shown = items
     const labelOf = item => item.parts.map(part => typeof part === 'string' ? part : part ? part.text : '').join('')
     const render = () => {
       const needle = field.value.toLowerCase()
       shown = items.filter(item => (item.search ?? labelOf(item)).toLowerCase().includes(needle))
       if (filterLine !== undefined) filterLine.content = field.render(palette, '输入以过滤')
+      if (countLine !== undefined) countLine.content = checked.size === 0 ? '还没有勾选；直接回车只启用光标所在的一项' : `已勾选 ${checked.size} 个`
       list.setItems(shown.map(item => ({
         parts: [
           multi && { text: checked.has(item) ? '[✓] ' : '[ ] ', fg: checked.has(item) ? palette.success : palette.textMuted },
@@ -440,6 +444,16 @@ export function selectPanel(terminal, { title, lines = [], items, initial = 0, f
         }
         if (key.ctrl && key.name === 'c') {
           done(undefined)
+          return
+        }
+        if (multi && key.ctrl && key.name === 'a') {
+          // Toggle every row the filter shows: check them all, or clear them when all are checked.
+          const all = shown.length > 0 && shown.every(item => checked.has(item))
+          for (const item of shown) {
+            if (all) checked.delete(item)
+            else checked.add(item)
+          }
+          render()
           return
         }
         if (filterable && field.handleKey(key)) {

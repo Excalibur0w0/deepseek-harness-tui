@@ -29,7 +29,8 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
 - 没有测试套件和 linter。TUI 要求 stdin 和 stdout 都是 TTY，在 Bash 工具里直接运行会报错退出（`--help` 和非 TTY 报错这两条路径可以直接跑）；`script` 命令在这个沙箱里也拿不到 TTY。
 - 交互验证分两步：
   1. 用 Python `pty.fork()` 启动 `bin/dshcli`，窗口设成 120×40，按步骤写入输入并把原始输出录下来。
-     - 普通字符逐个写入；转义序列（方向键 `\x1b[C`）必须一次写完，拆开会被解析成单独的 Esc。
+     - 普通字符逐个写入；转义序列（方向键 `\x1b[C`，以及以 `\x1b[<` 开头的 SGR 鼠标序列）必须一次写完，拆开会被解析成单独的 Esc。
+     - 鼠标：OpenTUI 开了 1000/1002/1003/1006 模式。拖选用 `\x1b[<0;列;行M` 按下、`\x1b[<32;列;行M` 拖动、`\x1b[<0;列;行m` 松开（行列从 1 开始）。测复制时先备份 `pbpaste` 的内容、测完 `pbcopy` 恢复，并且要有一个应当复制的对照组，否则「没复制」证明不了什么。
      - 回车写 `\r`，Ctrl-C 写 `\x03`，Ctrl-T 写 `\x14`，Esc 单独写 `\x1b`。
      - 以状态栏的「发送」判断就绪，以回合脚注的 `▣` 判断回合结束，以「需要确认」「enter 确认」判断面板出现。
   2. 再用 `@xterm/headless`（dsh 的 pnpm store 里有 6.0.0）把录下的字节回放成屏幕文本来检查。查看时保留空行，否则看不出块之间的间距。
@@ -66,6 +67,7 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
     - 对话区：`append()`、`clearTranscript()`、`note()`
     - 输入框和状态栏：`setMeta()`、`setBusy()`、`flashStatus()`、`setCompletionProvider()`
     - 面板：`runPanel(build, signal)`，以及串行化所有面板的 `exclusive(task)`
+  - 复制：对话区选中后松开鼠标自动复制；面板打开时不自动复制，因为面板是粘贴 key 的地方，一次误选就会悄悄覆盖剪贴板。
   - stderr：渲染器运行期间截获 `process.stderr.write`，状态栏显示条数，`close()` 销毁渲染器后再写回。
   - 图片（照 opencode `component/prompt/index.tsx` 的 `pasteAttachment` 和 `clipboard.ts`）：
     - 入口：Ctrl+V 由 `src/clipboard.js` 读系统剪贴板；括号粘贴为空时也读剪贴板；粘贴的文本是单个图片文件路径时读取该文件。
@@ -89,8 +91,13 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
   - 内置命令 `/help`、`/model`（用 ui 的 `selectPanel`）、`/new`、`/session`、`/exit`（别名 `/quit`）。
 - `packages/connect`（行 `tui-connect`）：`/connect`，照 opencode `component/dialog-provider.tsx`。它是独立插件，通过 `ctx.tuiCommands.register` 注册命令，用的是 dsh Web「模型」设置页背后的同一组服务：
   - 列表：`ctx.llm.listConfigurableProviders()`（内置目录约 40 家 + DeepSeek 官方 + 已声明的自定义路由；`deepseek-account` 隐藏）。每行的 key 引用名是 profile 里的 `apiKeyEnv`，没有时按 Web 的规则推导成 `<ID>_API_KEY`；没写 `apiKeyEnv` 时也查 `nativeAuth.env`。`ctx.credentials.describe(ref)` 判断是否已连接。只有 OAuth、没有环境变量的路由提示去网页版。
+  - key 只接受不含空格的可见 ASCII（`keyProblem()`）。dsh 只在请求时才拒绝带 HTTP 头不能携带字符的 key，那时 key 已经存进凭据文件了，所以要在保存前拦下误粘的文字。保存后 `reportConnected()` 等路由注册（`NO_ADAPTER` 时最多重试 2 秒），列模型出错就把错误原文显示出来，不要吞掉。
   - 内置路由：`ctx.credentials.set(ref, key)`；profile 还没写 `apiKeyEnv` 时，用 `ctx.settings.mutate(ns, [{ op: 'set', path: [...settingsPath(, 'apiKeyEnv')], value }])` 写上。`llm-pi-ai` 的 `providers` 是 volatile，写完立即注册路由，不用重启。
   - 自定义路由：名字、`baseURL`、协议（`openai-completions`/`openai-responses`/`anthropic-messages`）、key，然后 `ctx.llm.discoverModels(ns, { baseURL, api, apiKey })` 拉模型列表多选；拉不到就手填。最后把整个 profile（`displayName`、`api`、`baseURL`、`apiKeyEnv`、`models`）写到 `providers.<id>`。
+  - 管理自定义路由：已声明且有 `baseURL` 的路由（`isCustomRoute`）选中后进入 `manageCustom`：增减模型（`discoverModels(ns, { provider, baseURL, api })`，带上 `provider` 时 dsh 用已存的 key 和 headers；已启用的模型预先勾选，保留的模型沿用原条目，比如手写的 `input`；端点不再列出的模型也保留在候选里）、更换 key（走内置路由的流程）、删除（`settings.mutate` 的 `unset`；key 存在凭据文件里且没有别的路由在用时一并 `credentials.unset`）。确认删除的面板默认停在「取消」。
+  - 多选列表（`selectPanel` 的 `multi`）：空格勾选，Ctrl-A 勾选或取消当前过滤出的全部，`checked` 指定预先勾选的项，面板里显示已勾选数量。
+  - 输入类型：dsh 的 `discovery.ts` 解析 `/models` 时只保留 id、名称、上下文和最大输出，丢掉了输入类型（内置路由走目录时才有）。所以 `listingModalities()` 再直接请求一次 `{baseURL}/models`，从 `architecture.input_modalities`（OpenRouter）、`input_modalities`、`modalities.input`、`capabilities.vision`/`supports_vision` 里取，补到发现结果上，保存时写成模型的 `input`。这一步尽力而为：不走 dsh 的代理设置，失败或超时（15 秒）就不标；Anthropic 协议的列表不带这类信息，直接跳过。
+  - 内置路由的模型来自 dsh 依赖的 pi-ai 版本附带的静态目录，不会在线更新，`models` 写了就整份替换目录、`modelOverrides` 不能加目录外的 id。目录里缺新模型时，引导用户把同一个服务再加成自定义路由。
 
 ## 运行时约束
 

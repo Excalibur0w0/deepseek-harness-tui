@@ -4,7 +4,9 @@
  * (`ctx.llm.listConfigurableProviders()`), stores an API key through
  * `ctx.credentials`, and records the route through `ctx.settings`, the same
  * services dsh's Web Models page writes through. A custom route asks for its
- * endpoint and protocol and adopts models from `ctx.llm.discoverModels()`.
+ * endpoint and protocol and adopts models from `ctx.llm.discoverModels()`,
+ * adding the input modalities the endpoint's listing reports, which dsh's
+ * listing parser does not keep.
  */
 
 import { errorMessage } from '@dsh-tui/render'
@@ -25,6 +27,15 @@ const PROTOCOLS = [
   { api: 'openai-responses', label: 'OpenAI Responses', description: 'OpenAI 的新接口' },
   { api: 'anthropic-messages', label: 'Anthropic Messages', description: 'Claude 系列和兼容服务' },
 ]
+
+/** API keys are header values: visible ASCII without spaces. */
+const KEY_PATTERN = /^[\x21-\x7e]+$/
+
+/** How long a just-written route may take to register before its models are reported. */
+const REGISTRATION_WAIT_MS = 2000
+
+/** How long the modality lookup may take before the picker shows models without it. */
+const LISTING_TIMEOUT_MS = 15_000
 
 /** Marks the "custom provider" row in the provider list. */
 const CUSTOM = Symbol('custom provider')
@@ -63,11 +74,25 @@ function valueAt(value, path) {
 }
 
 /**
+ * Refuse a pasted value that cannot be an API key, such as text copied by
+ * mistake: dsh rejects a key with characters an HTTP header cannot carry only
+ * at request time, after it has been stored.
+ * @param {string} value - the trimmed input.
+ * @param {boolean} [optional] - whether an empty value is allowed.
+ * @returns {string | undefined} the problem to show, or undefined when the value is usable.
+ */
+function keyProblem(value, optional = false) {
+  if (value === '') return optional ? undefined : '请输入 API key'
+  if (KEY_PATTERN.test(value)) return undefined
+  return '这不像 API key：里面有空格、中文或全角符号。请重新复制 key 再粘贴'
+}
+
+/**
  * @param {{ configured: boolean, source?: string }} info - a credential description.
  * @returns {string} where the stored value comes from, for display.
  */
 function sourceLabel(info) {
-  return { file: '凭据文件', env: '环境变量' }[info.source] ?? info.source ?? '未知来源'
+  return { file: '凭据文件', env: '环境变量', 'project-env': '项目的 .env', 'user-env': '~/.dsh/.env' }[info.source] ?? info.source ?? '未知来源'
 }
 
 async function connect(ctx, terminal) {
@@ -99,7 +124,112 @@ async function connect(ctx, terminal) {
   })
   if (choice === undefined) return
   if (choice === CUSTOM) await connectCustom(llm, credentials, settings, terminal, rows)
+  else if (isCustomRoute(choice)) await manageCustom(llm, credentials, settings, terminal, choice, rows)
   else await connectKnown(llm, credentials, settings, terminal, choice)
+}
+
+/**
+ * @param {object} row - a provider row.
+ * @returns {boolean} whether the row is a route configuration declares, with its own endpoint.
+ */
+function isCustomRoute(row) {
+  return row.entry.declared === true && typeof row.profile?.baseURL === 'string'
+}
+
+/**
+ * Offer what can change on a custom route: its models, its key, or the route itself.
+ * @param {object} row - the chosen custom route.
+ * @param {object[]} rows - every provider row, to tell whether its key is shared.
+ */
+async function manageCustom(llm, credentials, settings, terminal, row, rows) {
+  const count = Array.isArray(row.profile.models) ? row.profile.models.length : 0
+  const action = await selectPanel(terminal, {
+    title: `管理 ${row.label}`,
+    lines: [`${row.profile.baseURL} · 已启用 ${count} 个模型`],
+    items: [
+      { parts: ['增减模型'], description: '从服务拉取最新列表，已启用的预先勾好', value: 'models' },
+      { parts: ['更换 API key'], value: 'key' },
+      { parts: ['删除这个服务'], description: '从配置里移除，模型不再出现在 /model', value: 'delete' },
+    ],
+  })
+  if (action === 'models') await reselectModels(llm, credentials, settings, terminal, row)
+  else if (action === 'key') await connectKnown(llm, credentials, settings, terminal, row)
+  else if (action === 'delete') await deleteCustom(credentials, settings, terminal, row, rows)
+}
+
+/**
+ * Re-pick a custom route's models from its endpoint's current listing. Kept
+ * models keep their configured entries, such as a hand-added `input`.
+ * @param {object} row - the custom route.
+ */
+async function reselectModels(llm, credentials, settings, terminal, row) {
+  const { provider } = row.entry
+  const { baseURL, api } = row.profile
+  terminal.flashStatus('正在获取模型列表…', 'textMuted')
+  let discovered
+  try {
+    // Naming the route lets dsh use its stored key and headers.
+    discovered = await llm.discoverModels(row.entry.settingsNs, { provider, baseURL, ...typeof api === 'string' ? { api } : {} })
+  } catch (error) {
+    terminal.note(`获取 ${row.label} 的模型列表失败：${errorMessage(error)}`, 'error')
+    return
+  }
+  const key = (await credentials.resolve(row.ref).catch(() => undefined))?.value ?? ''
+  discovered = withListingModalities(discovered, await listingModalities(baseURL, api, key))
+  const current = new Map((Array.isArray(row.profile.models) ? row.profile.models : []).map(model => [model.id, model]))
+  const listed = new Set(discovered.map(model => model.id))
+  // Models the endpoint no longer lists stay pickable, so keeping them is a choice.
+  const candidates = [...discovered, ...[...current.values()].filter(model => !listed.has(model.id))]
+  const picked = await pickModels(terminal, row.label, candidates, model => current.has(model.id))
+  if (picked === undefined) return
+  const models = picked.map(model => current.get(model.id) ?? modelEntry(model))
+  await settings.mutate(row.entry.settingsNs, [{ op: 'set', path: [...row.entry.settingsPath, 'models'], value: models }])
+  const added = models.filter(model => !current.has(model.id)).length
+  const removed = [...current.keys()].filter(id => !models.some(model => model.id === id)).length
+  terminal.note(`已更新 ${row.label}：启用 ${models.length} 个模型（新增 ${added} 个，移除 ${removed} 个）。`, 'success')
+}
+
+/**
+ * Remove a custom route, and its key when no other route reads it.
+ * @param {object} row - the custom route.
+ * @param {object[]} rows - every provider row.
+ */
+async function deleteCustom(credentials, settings, terminal, row, rows) {
+  const confirmed = await selectPanel(terminal, {
+    title: `删除 ${row.label}？`,
+    lines: ['它的模型会从 /model 里消失。之后想用可以重新添加。'],
+    initial: 1,
+    items: [{ parts: ['删除'], value: true }, { parts: ['取消'], value: false }],
+  })
+  if (confirmed !== true) return
+  await settings.mutate(row.entry.settingsNs, [{ op: 'unset', path: [...row.entry.settingsPath] }])
+  const shared = rows.some(other => other !== row && other.ref === row.ref && other.profile !== undefined)
+  if (!shared && row.credential?.info.source === 'file') await credentials.unset(row.ref)
+  terminal.note(`已删除 ${row.label}${shared ? '' : row.credential?.info.source === 'file' ? `，并移除了保存的 key（${row.ref}）` : ''}。`, 'success')
+}
+
+/**
+ * Let the user check models; shared by adding a custom route and re-picking its models.
+ * @param {string} label - the route's display name.
+ * @param {object[]} candidates - models to offer.
+ * @param {(model: object) => boolean} [isChecked] - models checked when the panel opens.
+ * @returns {Promise<object[] | undefined>} the checked models, or undefined when cancelled.
+ */
+function pickModels(terminal, label, candidates, isChecked = () => false) {
+  return selectPanel(terminal, {
+    title: `选择要启用的模型（${label}）`,
+    lines: [`共 ${candidates.length} 个模型。空格勾选，ctrl+a 全选当前过滤出的模型，回车确认。`],
+    filterable: true,
+    multi: true,
+    checked: isChecked,
+    rows: 12,
+    items: candidates.map(model => ({
+      parts: [model.id],
+      description: [model.name !== undefined && model.name !== model.id ? model.name : '', model.inputModalities?.includes('image') || model.input?.includes('image') ? '能看图' : ''].filter(Boolean).join(' · ') || undefined,
+      search: `${model.id} ${model.name ?? ''}`,
+      value: model,
+    })),
+  })
 }
 
 /**
@@ -157,7 +287,7 @@ async function connectKnown(llm, credentials, settings, terminal, row) {
     lines,
     placeholder: '粘贴 API key',
     mask: true,
-    validate: value => value === '' ? '请输入 API key' : undefined,
+    validate: value => keyProblem(value),
   })
   if (key === undefined) return
   await credentials.set(row.ref, key)
@@ -214,6 +344,7 @@ async function connectCustom(llm, credentials, settings, terminal, rows) {
     lines: [`API key 会保存到 ~/.dsh/.credentials.yaml，名称是 ${ref}。服务不需要 key 就直接回车。`],
     placeholder: '粘贴 API key',
     mask: true,
+    validate: value => keyProblem(value, true),
   })
   if (key === undefined) return
 
@@ -225,21 +356,10 @@ async function connectCustom(llm, credentials, settings, terminal, rows) {
   } catch (error) {
     failure = errorMessage(error)
   }
+  if (discovered.length > 0) discovered = withListingModalities(discovered, await listingModalities(baseURL, api, key))
   let models
   if (discovered.length > 0) {
-    models = await selectPanel(terminal, {
-      title: `选择要启用的模型（${id}）`,
-      lines: [`服务返回了 ${discovered.length} 个模型。空格勾选，回车确认；什么都不勾就启用当前这一个。`],
-      filterable: true,
-      multi: true,
-      rows: 12,
-      items: discovered.map(model => ({
-        parts: [model.id],
-        description: [model.name !== undefined && model.name !== model.id ? model.name : '', model.inputModalities?.includes('image') ? '能看图' : ''].filter(Boolean).join(' · ') || undefined,
-        search: `${model.id} ${model.name ?? ''}`,
-        value: model,
-      })),
-    })
+    models = await pickModels(terminal, id, discovered)
     if (models === undefined) return
   } else {
     const typed = await inputPanel(terminal, {
@@ -271,6 +391,59 @@ async function connectCustom(llm, credentials, settings, terminal, rows) {
 }
 
 /**
+ * Read each model's input modalities from an OpenAI-style `GET {baseURL}/models`
+ * listing. dsh's discovery parser keeps only ids, names, and capacities, while
+ * gateways report modalities in their own fields: OpenRouter under
+ * `architecture.input_modalities`, models.dev-style directories under
+ * `modalities.input`, others as `input_modalities` or a `vision` flag.
+ * Best effort: any failure returns an empty map.
+ * @param {string} baseURL - the endpoint root.
+ * @param {string} api - the route's protocol; Anthropic listings report no modalities.
+ * @param {string} key - the API key, or empty.
+ * @returns {Promise<Map<string, string[]>>} modalities by model id.
+ */
+async function listingModalities(baseURL, api, key) {
+  const found = new Map()
+  if (api === 'anthropic-messages') return found
+  let reply
+  try {
+    const response = await fetch(`${baseURL.replace(/\/+$/, '')}/models`, {
+      headers: key === '' ? {} : { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(LISTING_TIMEOUT_MS),
+    })
+    if (!response.ok) return found
+    reply = await response.json()
+  } catch {
+    // Unreachable, slow, or not JSON: the picker shows the models without modalities.
+    return found
+  }
+  const entries = Array.isArray(reply) ? reply
+    : Array.isArray(reply?.data) ? reply.data
+      : reply?.models !== null && typeof reply?.models === 'object' ? Object.entries(reply.models).map(([id, entry]) => ({ id, ...entry }))
+        : []
+  for (const entry of entries) {
+    if (typeof entry?.id !== 'string') continue
+    const listed = [entry.architecture?.input_modalities, entry.input_modalities, entry.modalities?.input].find(Array.isArray)
+    const flag = entry.capabilities?.vision ?? entry.supports_vision
+    const vision = listed?.includes('image') ?? (typeof flag === 'boolean' ? flag : undefined)
+    if (vision !== undefined) found.set(entry.id, vision ? ['text', 'image'] : ['text'])
+  }
+  return found
+}
+
+/**
+ * Fill in modalities the discovery reply left out.
+ * @param {Array<{ id: string, inputModalities?: string[] }>} models - discovered models.
+ * @param {Map<string, string[]>} modalities - modalities by model id from the raw listing.
+ * @returns {Array<object>} the models, each with modalities when either source has them.
+ */
+function withListingModalities(models, modalities) {
+  return models.map(model => model.inputModalities !== undefined || !modalities.has(model.id)
+    ? model
+    : { ...model, inputModalities: modalities.get(model.id) })
+}
+
+/**
  * @param {{ id: string, name?: string, contextWindow?: number, maxTokens?: number, inputModalities?: string[] }} model - a discovered or typed model.
  * @returns {Record<string, unknown>} the llm-pi-ai model entry.
  */
@@ -286,18 +459,38 @@ function modelEntry(model) {
 }
 
 /**
- * Report the connected route and how many models it now serves.
+ * Report the connected route and how many models it now serves, or why its
+ * models cannot be listed, such as a key dsh refuses.
  * @param {string} provider - route id.
  * @param {string} label - display name.
  */
 async function reportConnected(llm, terminal, provider, label) {
-  // Settings writes apply live; the route re-registers on the next tick.
-  await new Promise(resolve => setTimeout(resolve, 50))
-  const models = await llm.listModels(provider).catch(() => [])
   const { palette } = terminal
+  // Settings writes apply live, but the route registers asynchronously.
+  const deadline = Date.now() + REGISTRATION_WAIT_MS
+  let models = []
+  let failure
+  while (true) {
+    try {
+      models = await llm.listModels(provider)
+      failure = undefined
+    } catch (error) {
+      failure = error
+    }
+    if (failure?.code !== 'NO_ADAPTER' || Date.now() >= deadline) break
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  if (failure !== undefined) {
+    terminal.note(spans(
+      { text: '已保存 ', fg: palette.warning },
+      { text: label, fg: palette.text, bold: true },
+      `，但列模型时出错：${errorMessage(failure)}`,
+    ))
+    return
+  }
   terminal.note(spans(
     { text: '已连接 ', fg: palette.success },
     { text: label, fg: palette.text, bold: true },
-    models.length > 0 ? `，可用 ${models.length} 个模型。用 /model 切换。` : '。模型列表暂时为空，可以稍后用 /model 查看。',
+    models.length > 0 ? `，可用 ${models.length} 个模型。用 /model 切换。` : '，但这个服务没有列出任何模型。',
   ))
 }

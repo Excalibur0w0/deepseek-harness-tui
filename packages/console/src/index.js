@@ -179,7 +179,9 @@ class TuiConsole {
       paddingBottom: 1,
       gap: 1,
       backgroundColor: palette.background,
-      onMouseUp: () => { this.copySelection() },
+      // Selecting in the transcript copies on release; a panel, where keys are
+      // pasted, copies only on Ctrl-C so a stray selection cannot replace the clipboard.
+      onMouseUp: () => { if (this.panel === undefined) this.copySelection() },
     })
     this.scroll = new ScrollBoxRenderable(renderer, {
       flexGrow: 1,
