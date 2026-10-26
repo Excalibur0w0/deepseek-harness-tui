@@ -2,24 +2,7 @@
 
 在终端里和 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下面简称 dsh）的 agent 对话。界面照着 [opencode](https://github.com/anomalyco/opencode) 做：上面是对话，下面是输入框，agent 读文件、跑命令、改代码的过程都会显示出来，需要权限时会弹出确认。
 
-```
- ┃
- ┃  读一下 package.json 的 name
- ┃
-
-     → 读取 package.json
-
-     pty-demo
-
-     ▣ deepseek-flash · 5.7s
-
- ┃
- ┃  输入消息，/ 查看命令
- ┃
- ┃  deepseek-flash deepseek-official
- ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ~/project                  enter 发送  / 命令  ctrl+c 退出
-```
+![dshcli 的界面：上方是对话，折叠的思考、Markdown 回复和回合脚注；下方是输入框和当前模型](docs/screenshot.png)
 
 它不是一个独立的程序，而是 dsh 的插件：你在哪个目录启动 `dshcli`，agent 就在哪个目录里干活，会话记录和 dsh 网页版共用。
 
