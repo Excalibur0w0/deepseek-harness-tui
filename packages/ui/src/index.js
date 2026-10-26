@@ -333,15 +333,17 @@ export class TextField {
   /**
    * @param {Readonly<Record<string, string>>} palette - theme colors.
    * @param {string} [placeholder] - shown while the value is empty.
-   * @returns {StyledText} the field with a block cursor.
+   * @returns {StyledText} the field with a block cursor at the end of the value.
    */
   render(palette, placeholder = '') {
+    const prompt = { text: '› ', fg: palette.secondary }
     const shown = this.mask ? '•'.repeat([...this.value].length) : this.value
-    return spans(
-      { text: '› ', fg: palette.secondary },
-      shown === '' ? { text: placeholder, fg: palette.textMuted } : { text: shown, fg: palette.text },
-      { text: ' ', bg: palette.text },
-    )
+    if (shown === '') {
+      // Empty: the cursor sits at the start, drawn over the placeholder's first character.
+      const [first = ' ', ...rest] = [...placeholder]
+      return spans(prompt, { text: first, fg: palette.background, bg: palette.text }, { text: rest.join(''), fg: palette.textMuted })
+    }
+    return spans(prompt, { text: shown, fg: palette.text }, { text: ' ', bg: palette.text })
   }
 }
 
