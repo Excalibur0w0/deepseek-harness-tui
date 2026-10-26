@@ -100,7 +100,9 @@ pnpm dsh --profile tui --dump-config | grep "id: tui-"
 
 ### 5. 配置 API key
 
-默认用 DeepSeek 官方 API 的 `deepseek-flash` 模型。到 [platform.deepseek.com](https://platform.deepseek.com) 申请一个 key，写进 `~/.dsh/.env`：
+默认用 DeepSeek 官方 API 的 `deepseek-flash` 模型。先到 [platform.deepseek.com](https://platform.deepseek.com) 申请一个 key，第 7 步启动后在输入框里输入 `/connect`，选 DeepSeek，把 key 粘贴进去就行。
+
+也可以现在就写进 `~/.dsh/.env`：
 
 ```sh
 echo 'DEEPSEEK_API_KEY=sk-你的key' >> ~/.dsh/.env
@@ -155,6 +157,7 @@ dshcli
 | `/help` | 列出所有命令和按键 |
 | `/model` | 切换模型，可以打字过滤。只对当前会话有效 |
 | `/model <provider>/<model>` | 直接切到指定模型 |
+| `/connect` | 连接模型服务：填 API key，或者添加自定义服务 |
 | `/new` | 保存当前会话，开一个新的 |
 | `/session` | 看当前会话的 id、模型和目录 |
 | `/exit` | 保存并退出 |
@@ -175,9 +178,19 @@ agent 有时会给你几个选项让你选。上下键或数字键选，多选�
 
 ## 换成别的模型
 
-临时换：在输入框里用 `/model`。
+### 用 /connect
 
-长期换，或者接入自己的模型服务（任何兼容 OpenAI 或 Anthropic 接口的服务都行），编辑 `~/.dsh/profiles/tui/cordis.patch.yml`。下面是一个例子，按你的服务改名字、地址和模型：
+在输入框里输入 `/connect`，会列出 dsh 认识的四十多家服务（OpenAI、Anthropic、Google、OpenRouter、Moonshot、智谱、MiniMax 等），已经连上的前面有 `●`。打字可以过滤。
+
+- 选一家，粘贴 API key，回车。key 存在 `~/.dsh/.credentials.yaml`，屏幕上只显示圆点。保存后马上能在 `/model` 里选到这家的模型，不用重启。
+- 列表里没有的服务，选最后一项「自定义服务」，按提示依次填名字、接口地址、协议和 key。程序会去这个服务的 `/models` 接口拉模型列表让你勾选；拉不到的话手动填模型名。
+- 标着「只支持账号登录」的服务（比如 openai-codex）要在 dsh 网页版里连接，TUI 还不能完成账号登录。
+
+`/connect` 写的是 `~/.dsh/profiles/tui/cordis.patch.yml` 和 `~/.dsh/.credentials.yaml`，和手动改配置效果一样。
+
+### 手动改配置
+
+切换模型只对当前会话有效。想换默认模型，或者给模型标上能看图，就编辑 `~/.dsh/profiles/tui/cordis.patch.yml`。下面是一个例子，按你的服务改名字、地址和模型：
 
 ```yaml
 - id: llm-pi-ai
@@ -210,7 +223,7 @@ agent 有时会给你几个选项让你选。上下键或数字键选，多选�
 | `dshcli: no Node.js with node:ffi found` | 当前的 Node 不带 FFI，回到第 1 步。也可以用 `DSH_TUI_NODE=/某个/node` 指定 |
 | `the tui profile needs an interactive terminal` | 要在真正的终端里运行，不能接管道或重定向 |
 | 发消息后报 `MISSING_CREDENTIAL` | 没配 API key，回到第 5 步 |
-| `/model` 列表里没有某个模型 | 那个服务的 key 没配上，或者配置文件里没写这个模型 |
+| `/model` 列表里没有某个模型 | 那个服务的 key 没配上（用 `/connect` 配），或者配置文件里没写这个模型 |
 
 dsh 运行时往 stderr 输出的信息不会弄乱界面，状态栏会显示「⚠ N 条诊断」，退出后再打印出来。
 
@@ -232,6 +245,7 @@ dsh 运行时往 stderr 输出的信息不会弄乱界面，状态栏会显示�
 - `transcript`：把 agent 的输出画成对话里的各种块。
 - `interaction`：权限确认和提问面板。
 - `commands`：`/` 命令。
+- `connect`：`/connect`，作为一个独立插件注册命令，可以照着它给 TUI 加新命令。
 - `ui`：对 OpenTUI 的一层封装，只有它直接用 OpenTUI。
 - `render`：配色、工具标题这类不涉及界面的小函数。
 

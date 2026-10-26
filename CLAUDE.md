@@ -35,6 +35,7 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
   2. 再用 `@xterm/headless`（dsh 的 pnpm store 里有 6.0.0）把录下的字节回放成屏幕文本来检查。查看时保留空行，否则看不出块之间的间距。
 - 交互验证会调用真实模型，先确认 tui profile 配置的模型服务可用。本机的模型服务、网关和注意事项写在不入库的 `CLAUDE.local.md` 里。
 - 测图片：用括号粘贴（`\x1b[200~路径\x1b[201~`）模拟把文件拖进终端，不用动系统剪贴板。要让图片真正发出去，需要一个声明了图片输入的模型；可以用 `--patch` 叠加一份只改了 `defaultInput` 的 `llm-pi-ai` 行，不改用户的 profile。测 Ctrl+V 会改用户的系统剪贴板，先备份剪贴板内容，测完恢复。
+- 测 `/connect` 会写 key 和 profile 配置，不要在用户的 `~/.dsh` 上测：用 `DSH_HOME=<scratchpad>/dshhome` 在 dsh 仓库里 `pnpm dsh plugin --profile tui add <本仓库>` 装一个临时 profile，再用同样的 `DSH_HOME` 启动 `bin/dshcli`。自定义服务用本地起一个返回 `{ data: [{ id }] }` 的 `/v1/models` 假服务来测。差分渲染只输出变化的格子，面板标题只改了一个字时 `until` 匹配不到完整文字，用截图判断。
 - 测审批时选一个会被 workspace-write 沙箱拦下的操作，例如写 `~` 下的文件（`/tmp` 可写，不会触发审批），并选「拒绝」。测提问让模型调用 `ask_user_question`。每次验证都会在 `~/.dsh/sessions` 留下会话。
 - 中文输入法、鼠标滚动和复制在 pty 里测不了，要请用户在真实终端里试。
 
@@ -53,13 +54,14 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
     - interaction 发 `tui/approval`（callId、outcome），transcript 据此划掉被拒绝的工具行。
 - `packages/ui`：唯一 import `@opentui/core` 的包，其他包都用它重新导出的类，保证全仓库只加载一份 OpenTUI。
   - 构件：`splitBlock`（opencode 的左 `┃` 竖线块）、`spans()`（字符串和 `{ text, fg, bg, bold, strikethrough… }` 拼成 `StyledText`）、`Spinner`、`createSyntaxStyles`、`panelFrame`、`ListView`、`keyHints`、`discard`。
+  - 面板：`selectPanel`（可过滤、可多选的列表）和 `inputPanel`（单行输入，可遮盖、带校验），都基于 `terminal.runPanel`。它们用自己画的 `TextField` 收键，因为 OpenTUI 的输入框不支持遮盖；粘贴经面板的 `onPaste` 进来。
 - `packages/render`：纯函数，不碰 OpenTUI。
   - 主题：opencode 默认暗色色板 `darkPalette`，`NO_COLOR` 时用 `monochromePalette`；`syntaxRules` 移植自 opencode `theme/index.ts` 的 `getSyntaxRules`。
   - 工具：`toolView` 把 dsh 工具名映射成 opencode 风格的图标和中文标题；`unifiedDiff` 把 dsh-tool-fs 的 `meta.diffs` 转成 unified diff。
 - `packages/console`（`tuiConsole`）：OpenTUI 全屏宿主。
   - 布局：`apply` 处理 `--help` 和 TTY 检查，不满足时不提供服务，下游插件就不会挂载。`open()` 创建备用屏幕渲染器，布局是 ScrollBox 对话区、`/` 补全列表、输入框（Textarea 加模型行和 `╹▀` 半高底边）、面板槽位、状态栏。
   - 按键：都在 `renderer.keyInput` 的全局 keypress 里处理，处理了就 `preventDefault()`，没处理的才会到输入框。
-    - 面板打开时所有键交给面板；面板的 `onKey` 返回 `false` 时放行给面板自己的输入框。
+    - 面板打开时所有键交给面板；面板的 `onKey` 返回 `false` 时放行给面板自己的输入框。括号粘贴由 `renderer.keyInput` 的 `paste` 事件转给面板的 `onPaste`（面板没提供时交给它自己聚焦的输入框）。
   - 接口：
     - 对话区：`append()`、`clearTranscript()`、`note()`
     - 输入框和状态栏：`setMeta()`、`setBusy()`、`flashStatus()`、`setCompletionProvider()`
@@ -84,7 +86,11 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
   - 它自己记录所有 session 的 `tool/call`，审批面板据此显示要批准的工具行。
 - `packages/commands`（`tuiCommands`）：`register({ name, aliases?, help, run })` 返回注销函数，调用方用 `ctx.effect()` 包住。
   - `/help` 和 `/` 补全都由注册表生成。
-  - 内置命令 `/help`、`/model`（可过滤的选择面板）、`/new`、`/session`、`/exit`（别名 `/quit`）。
+  - 内置命令 `/help`、`/model`（用 ui 的 `selectPanel`）、`/new`、`/session`、`/exit`（别名 `/quit`）。
+- `packages/connect`（行 `tui-connect`）：`/connect`，照 opencode `component/dialog-provider.tsx`。它是独立插件，通过 `ctx.tuiCommands.register` 注册命令，用的是 dsh Web「模型」设置页背后的同一组服务：
+  - 列表：`ctx.llm.listConfigurableProviders()`（内置目录约 40 家 + DeepSeek 官方 + 已声明的自定义路由；`deepseek-account` 隐藏）。每行的 key 引用名是 profile 里的 `apiKeyEnv`，没有时按 Web 的规则推导成 `<ID>_API_KEY`；没写 `apiKeyEnv` 时也查 `nativeAuth.env`。`ctx.credentials.describe(ref)` 判断是否已连接。只有 OAuth、没有环境变量的路由提示去网页版。
+  - 内置路由：`ctx.credentials.set(ref, key)`；profile 还没写 `apiKeyEnv` 时，用 `ctx.settings.mutate(ns, [{ op: 'set', path: [...settingsPath(, 'apiKeyEnv')], value }])` 写上。`llm-pi-ai` 的 `providers` 是 volatile，写完立即注册路由，不用重启。
+  - 自定义路由：名字、`baseURL`、协议（`openai-completions`/`openai-responses`/`anthropic-messages`）、key，然后 `ctx.llm.discoverModels(ns, { baseURL, api, apiKey })` 拉模型列表多选；拉不到就手填。最后把整个 profile（`displayName`、`api`、`baseURL`、`apiKeyEnv`、`models`）写到 `providers.<id>`。
 
 ## 运行时约束
 
@@ -111,6 +117,8 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
   - `packages/fs/tool-fs/src/diff.ts`：write/edit 结果 `meta.diffs` 的格式
   - `packages/attachment/attachment/src/types.ts`、`docs/subsystems/attachment.md`：`admitPromptContent` 的输入输出、支持的图片类型和大小限制
   - `packages/api/session-controller/src/commands.ts` 的 `prompt()`：带图片的消息怎么检查模型和组装
+  - `packages/client/ui-settings-models/src/client/store.ts`、`ProviderEditor.tsx`：Web「模型」页怎么推导 key 引用名、写 provider（`/connect` 照着做）
+  - `packages/llm/llm/src/types.ts` 的 `LlmConfigurableProvider`、`LlmModelDiscoveryRequest`；`packages/llm/llm-pi-ai/src/config.ts`：provider profile 的字段
   - `packages/interaction/user-approval/src/types.ts`、`packages/interaction/user-questions/src/types.ts`
   - `docs/tool-catalog.md`：各工具的参数名（`toolView` 用到）
 - 界面照 opencode 源码（[anomalyco/opencode](https://github.com/anomalyco/opencode) 的 `packages/tui/src`，本机副本的位置见 `CLAUDE.local.md`）：

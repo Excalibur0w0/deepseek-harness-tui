@@ -6,7 +6,7 @@
  */
 
 import { errorMessage, formatSelection } from '@dsh-tui/render'
-import { ListView, keyHints, panelFrame, spans, text } from '@dsh-tui/ui'
+import { selectPanel, spans } from '@dsh-tui/ui'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-commands'
@@ -199,65 +199,21 @@ async function switchModel(ctx, terminal, chat, argument) {
  * @returns {Promise<{ provider: string, model: string } | undefined>} the choice, or undefined when cancelled.
  */
 function pickModel(terminal, models, current) {
-  const { renderer, palette } = terminal
-  return terminal.runPanel(done => {
-    const { root, body, footer } = panelFrame(renderer, palette, palette.secondary)
-    body.add(text(renderer, spans({ text: '选择模型', fg: palette.text, bold: true })))
-    const filterLine = text(renderer, '', { wrapMode: 'none' })
-    body.add(filterLine)
-    const list = new ListView(renderer, palette, MODEL_ROWS)
-    body.add(list.renderable)
-    footer.add(text(renderer, spans(...keyHints(palette, [['输入', '过滤'], ['↑↓', '选择'], ['enter', '切换'], ['esc', '取消']])), { wrapMode: 'none' }))
-    let filter = ''
-    let shown = models
-    const render = () => {
-      const needle = filter.toLowerCase()
-      shown = models.filter(model => `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(needle))
-      filterLine.content = spans({ text: '› ', fg: palette.secondary }, filter === '' ? { text: '输入以过滤', fg: palette.textMuted } : { text: filter, fg: palette.text })
-      list.setItems(shown.map(model => ({
-        parts: [
-          { text: model.provider === current.provider && model.id === current.model ? '● ' : '  ', fg: palette.success },
-          { text: `${model.provider}/`, fg: palette.textMuted },
-          { text: model.id, fg: palette.text },
-        ],
-        description: model.name !== model.id ? model.name : undefined,
-      })))
-    }
-    list.active = Math.max(0, models.findIndex(model => model.provider === current.provider && model.id === current.model))
-    render()
-    return {
-      renderable: root,
-      onKey: key => {
-        switch (key.name) {
-          case 'up':
-          case 'down':
-            list.move(key.name === 'up' ? -1 : 1)
-            return
-          case 'return': {
-            const model = shown[list.active]
-            if (model !== undefined) done({ provider: model.provider, model: model.id })
-            return
-          }
-          case 'escape':
-            done(undefined)
-            return
-          case 'backspace':
-            filter = filter.slice(0, -1)
-            list.active = 0
-            render()
-            return
-          default:
-            if (key.ctrl && key.name === 'c') {
-              done(undefined)
-              return
-            }
-            if (!key.ctrl && !key.meta && key.sequence.length === 1 && key.sequence >= ' ') {
-              filter += key.sequence
-              list.active = 0
-              render()
-            }
-        }
-      },
-    }
+  const { palette } = terminal
+  const isCurrent = model => model.provider === current.provider && model.id === current.model
+  return selectPanel(terminal, {
+    title: '选择模型',
+    filterable: true,
+    initial: Math.max(0, models.findIndex(isCurrent)),
+    items: models.map(model => ({
+      parts: [
+        { text: isCurrent(model) ? '● ' : '  ', fg: palette.success },
+        { text: `${model.provider}/`, fg: palette.textMuted },
+        { text: model.id, fg: palette.text },
+      ],
+      description: model.name !== model.id ? model.name : undefined,
+      search: `${model.provider}/${model.id} ${model.name}`,
+      value: { provider: model.provider, model: model.id },
+    })),
   })
 }

@@ -14,6 +14,9 @@ importers:
       '@dsh-tui/commands':
         specifier: workspace:*
         version: link:packages/commands
+      '@dsh-tui/connect':
+        specifier: workspace:*
+        version: link:packages/connect
       '@dsh-tui/console':
         specifier: workspace:*
         version: link:packages/console
@@ -31,6 +34,15 @@ importers:
         version: link:../render
 
   packages/commands:
+    dependencies:
+      '@dsh-tui/render':
+        specifier: workspace:*
+        version: link:../render
+      '@dsh-tui/ui':
+        specifier: workspace:*
+        version: link:../ui
+
+  packages/connect:
     dependencies:
       '@dsh-tui/render':
         specifier: workspace:*

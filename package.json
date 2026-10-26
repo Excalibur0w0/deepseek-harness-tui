@@ -20,6 +20,7 @@
   "dependencies": {
     "@dsh-tui/chat": "workspace:*",
     "@dsh-tui/commands": "workspace:*",
+    "@dsh-tui/connect": "workspace:*",
     "@dsh-tui/console": "workspace:*",
     "@dsh-tui/interaction": "workspace:*",
     "@dsh-tui/transcript": "workspace:*"

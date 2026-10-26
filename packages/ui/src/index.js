@@ -275,3 +275,235 @@ export function discard(renderable) {
   renderable.parent?.remove(renderable)
   renderable.destroyRecursively()
 }
+
+/**
+ * Whether a key press types text: a printable sequence without Ctrl or Meta.
+ * @param {import('@opentui/core').KeyEvent} key - the key event.
+ * @returns {boolean} whether `key.sequence` should be inserted.
+ */
+export function isTypedKey(key) {
+  return !key.ctrl && !key.meta && typeof key.sequence === 'string' && key.sequence.length > 0
+    && !/[\u0000-\u001f\u007f]/.test(key.sequence)
+}
+
+/**
+ * A one-line text field drawn as styled text, for panels that own every key.
+ * It edits at the end only, which suits the short values panels ask for.
+ */
+export class TextField {
+  /**
+   * @param {object} options - field options.
+   * @param {boolean} [options.mask] - draw each character as a dot, for secrets.
+   * @param {string} [options.initial] - starting value.
+   */
+  constructor({ mask = false, initial = '' } = {}) {
+    this.mask = mask
+    this.value = initial
+  }
+
+  /**
+   * @param {import('@opentui/core').KeyEvent} key - the key event.
+   * @returns {boolean} whether the key changed the value.
+   */
+  handleKey(key) {
+    if (key.name === 'backspace') {
+      this.value = [...this.value].slice(0, -1).join('')
+      return true
+    }
+    if (key.ctrl && key.name === 'u') {
+      this.value = ''
+      return true
+    }
+    if (key.ctrl && key.name === 'w') {
+      this.value = this.value.replace(/\S*\s*$/, '')
+      return true
+    }
+    if (!isTypedKey(key)) return false
+    this.value += key.sequence
+    return true
+  }
+
+  /**
+   * @param {string} pasted - pasted text; line breaks are dropped.
+   */
+  paste(pasted) {
+    this.value += pasted.replace(/[\r\n]+/g, '')
+  }
+
+  /**
+   * @param {Readonly<Record<string, string>>} palette - theme colors.
+   * @param {string} [placeholder] - shown while the value is empty.
+   * @returns {StyledText} the field with a block cursor.
+   */
+  render(palette, placeholder = '') {
+    const shown = this.mask ? '•'.repeat([...this.value].length) : this.value
+    return spans(
+      { text: '› ', fg: palette.secondary },
+      shown === '' ? { text: placeholder, fg: palette.textMuted } : { text: shown, fg: palette.text },
+      { text: ' ', bg: palette.text },
+    )
+  }
+}
+
+/**
+ * @typedef {object} SelectItem
+ * @property {Array<string | Span | false | undefined>} parts - the row label.
+ * @property {string} [description] - muted text after the label.
+ * @property {string} [search] - text the filter matches; defaults to the label text.
+ * @property {unknown} value - what selecting the row returns.
+ */
+
+/**
+ * Ask the user to pick from a list in a panel, optionally filtered by typing
+ * or with several rows checked by Space.
+ * @param {object} terminal - the TUI console.
+ * @param {object} options - panel options.
+ * @param {string} options.title - panel heading.
+ * @param {Array<string | StyledText>} [options.lines] - muted explanation lines under the heading.
+ * @param {SelectItem[]} options.items - rows.
+ * @param {number} [options.initial] - row highlighted first.
+ * @param {boolean} [options.filterable] - typing narrows the rows.
+ * @param {boolean} [options.multi] - Space checks rows and Enter returns every checked value.
+ * @param {number} [options.rows] - rows visible at once.
+ * @returns {Promise<unknown>} the chosen value (an array when `multi`), or undefined when cancelled.
+ */
+export function selectPanel(terminal, { title, lines = [], items, initial = 0, filterable = false, multi = false, rows = 10 }) {
+  const { renderer, palette } = terminal
+  return terminal.runPanel(done => {
+    const { root, body, footer } = panelFrame(renderer, palette, palette.secondary)
+    body.add(text(renderer, spans({ text: title, fg: palette.text, bold: true })))
+    for (const line of lines) body.add(text(renderer, line, { fg: palette.textMuted }))
+    const filterLine = filterable ? text(renderer, '', { wrapMode: 'none' }) : undefined
+    if (filterLine !== undefined) body.add(filterLine)
+    const list = new ListView(renderer, palette, rows)
+    body.add(list.renderable)
+    footer.add(text(renderer, spans(...keyHints(palette, [
+      ...filterable ? [['输入', '过滤']] : [],
+      ['↑↓', '选择'],
+      ...multi ? [['space', '勾选']] : [],
+      ['enter', '确认'],
+      ['esc', '取消'],
+    ])), { wrapMode: 'none' }))
+    const field = new TextField()
+    const checked = new Set()
+    let shown = items
+    const labelOf = item => item.parts.map(part => typeof part === 'string' ? part : part ? part.text : '').join('')
+    const render = () => {
+      const needle = field.value.toLowerCase()
+      shown = items.filter(item => (item.search ?? labelOf(item)).toLowerCase().includes(needle))
+      if (filterLine !== undefined) filterLine.content = field.render(palette, '输入以过滤')
+      list.setItems(shown.map(item => ({
+        parts: [
+          multi && { text: checked.has(item) ? '[✓] ' : '[ ] ', fg: checked.has(item) ? palette.success : palette.textMuted },
+          ...item.parts,
+        ],
+        description: item.description,
+      })))
+    }
+    list.active = Math.max(0, Math.min(initial, items.length - 1))
+    render()
+    return {
+      renderable: root,
+      onKey: key => {
+        switch (key.name) {
+          case 'up':
+          case 'down':
+            list.move(key.name === 'up' ? -1 : 1)
+            return
+          case 'return': {
+            if (multi) {
+              const picked = items.filter(item => checked.has(item))
+              const fallback = shown[list.active]
+              done((picked.length > 0 ? picked : fallback === undefined ? [] : [fallback]).map(item => item.value))
+              return
+            }
+            const item = shown[list.active]
+            if (item !== undefined) done(item.value)
+            return
+          }
+          case 'escape':
+            done(undefined)
+            return
+          case 'space':
+            if (multi && shown[list.active] !== undefined) {
+              const item = shown[list.active]
+              if (checked.has(item)) checked.delete(item)
+              else checked.add(item)
+              render()
+              return
+            }
+            break
+          default:
+            break
+        }
+        if (key.ctrl && key.name === 'c') {
+          done(undefined)
+          return
+        }
+        if (filterable && field.handleKey(key)) {
+          list.active = 0
+          render()
+        }
+      },
+      onPaste: pasted => {
+        if (!filterable) return
+        field.paste(pasted)
+        list.active = 0
+        render()
+      },
+    }
+  })
+}
+
+/**
+ * Ask for one line of text in a panel.
+ * @param {object} terminal - the TUI console.
+ * @param {object} options - panel options.
+ * @param {string} options.title - panel heading.
+ * @param {Array<string | StyledText>} [options.lines] - muted explanation lines under the heading.
+ * @param {string} [options.placeholder] - shown while the field is empty.
+ * @param {boolean} [options.mask] - hide the typed characters.
+ * @param {string} [options.initial] - starting value.
+ * @param {(value: string) => string | undefined} [options.validate] - returns an error to show, or undefined to accept.
+ * @returns {Promise<string | undefined>} the trimmed value, or undefined when cancelled.
+ */
+export function inputPanel(terminal, { title, lines = [], placeholder = '', mask = false, initial = '', validate = () => undefined }) {
+  const { renderer, palette } = terminal
+  return terminal.runPanel(done => {
+    const { root, body, footer } = panelFrame(renderer, palette, palette.secondary)
+    body.add(text(renderer, spans({ text: title, fg: palette.text, bold: true })))
+    for (const line of lines) body.add(text(renderer, line, { fg: palette.textMuted }))
+    const field = new TextField({ mask, initial })
+    const fieldLine = text(renderer, '', { wrapMode: 'char' })
+    const errorLine = text(renderer, '', { fg: palette.error })
+    body.add(fieldLine)
+    body.add(errorLine)
+    footer.add(text(renderer, spans(...keyHints(palette, [['enter', '确认'], ['esc', '取消']])), { wrapMode: 'none' }))
+    const render = error => {
+      fieldLine.content = field.render(palette, placeholder)
+      errorLine.content = error ?? ''
+    }
+    render()
+    return {
+      renderable: root,
+      onKey: key => {
+        if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
+          done(undefined)
+          return
+        }
+        if (key.name === 'return') {
+          const value = field.value.trim()
+          const error = validate(value)
+          if (error === undefined) done(value)
+          else render(error)
+          return
+        }
+        if (field.handleKey(key)) render()
+      },
+      onPaste: pasted => {
+        field.paste(pasted)
+        render()
+      },
+    }
+  })
+}

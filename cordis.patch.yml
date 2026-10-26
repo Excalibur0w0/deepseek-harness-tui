@@ -30,6 +30,10 @@
     - id: tui-commands
       name: '@dsh-tui/commands'
 
+    # /connect: provider keys and custom model services; registers through tuiCommands.
+    - id: tui-connect
+      name: '@dsh-tui/connect'
+
     # dsh-base omits ask_user_question; tui-interaction answers it in a panel.
     - id: tool-ask-user
       name: '@deepseek-ai/dsh-tool-ask-user'

@@ -1,0 +1,16 @@
+{
+  "name": "@dsh-tui/connect",
+  "version": "0.2.0",
+  "private": true,
+  "description": "The /connect command: store provider keys and add custom model services for deepseek-harness-tui",
+  "type": "module",
+  "exports": "./src/index.js",
+  "engines": {
+    "dsh": ">=0.2.1-rc.3 <0.3.0"
+  },
+  "dependencies": {
+    "@dsh-tui/render": "workspace:*",
+    "@dsh-tui/ui": "workspace:*"
+  },
+  "license": "MIT"
+}

@@ -140,6 +140,7 @@ class TuiConsole {
     Object.assign(this, createSyntaxStyles(this.renderer, this.palette))
     this.buildLayout()
     this.renderer.keyInput.on('keypress', key => this.onKey(key))
+    this.renderer.keyInput.on('paste', event => this.onPanelPaste(event))
     this.input.focus()
   }
 
@@ -702,11 +703,12 @@ class TuiConsole {
    * @param {object} options - the panel.
    * @param {import('@opentui/core').Renderable} options.renderable - the panel's root.
    * @param {(key: import('@opentui/core').KeyEvent) => boolean | void} options.onKey - key handler; returning false lets the key reach the panel's focused input.
+   * @param {(text: string) => void} [options.onPaste] - receives pasted text; without it a paste reaches the panel's focused input.
    * @param {() => void} [options.onCancel] - called when the terminal withdraws the panel.
    * @returns {() => void} closes the panel and restores the prompt.
    */
-  showPanel({ renderable, onKey, onCancel }) {
-    const panel = { renderable, onKey, onCancel }
+  showPanel({ renderable, onKey, onPaste, onCancel }) {
+    const panel = { renderable, onKey, onPaste, onCancel }
     this.panel = panel
     this.hideCompletions()
     this.input.blur()
@@ -733,7 +735,7 @@ class TuiConsole {
    * panel closes on settlement, on `signal` abort, and when the terminal
    * withdraws it; the last two settle with `undefined`.
    * @template T
-   * @param {(done: (value: T | undefined) => void) => { renderable: import('@opentui/core').Renderable, onKey: (key: import('@opentui/core').KeyEvent) => boolean | void }} build - builds the panel.
+   * @param {(done: (value: T | undefined) => void) => { renderable: import('@opentui/core').Renderable, onKey: (key: import('@opentui/core').KeyEvent) => boolean | void, onPaste?: (text: string) => void }} build - builds the panel.
    * @param {AbortSignal} [signal] - withdraws the panel when aborted.
    * @returns {Promise<T | undefined>} the settled value.
    */
@@ -766,6 +768,16 @@ class TuiConsole {
     const run = this.chain.then(task, task)
     this.chain = run.catch(() => undefined)
     return run
+  }
+
+  /**
+   * Give a bracketed paste to the open panel when it takes pastes itself.
+   * @param {import('@opentui/core').PasteEvent} event - the paste event.
+   */
+  onPanelPaste(event) {
+    if (this.panel?.onPaste === undefined) return
+    event.preventDefault()
+    this.panel.onPaste(decodePasteBytes(event.bytes))
   }
 
   /** Withdraw the open panel through its cancel callback. */
