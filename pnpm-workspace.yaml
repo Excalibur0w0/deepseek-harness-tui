@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+
+# dsh packages are peers that the running dsh supplies at load time; do not
+# install registry copies of them.
+autoInstallPeers: false

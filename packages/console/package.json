@@ -1,0 +1,16 @@
+{
+  "name": "@dsh-tui/console",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Full-screen OpenTUI host for deepseek-harness-tui: transcript, prompt, status row, and panels",
+  "type": "module",
+  "exports": "./src/index.js",
+  "engines": {
+    "dsh": ">=0.2.1-rc.3 <0.3.0"
+  },
+  "dependencies": {
+    "@dsh-tui/render": "workspace:*",
+    "@dsh-tui/ui": "workspace:*"
+  },
+  "license": "MIT"
+}

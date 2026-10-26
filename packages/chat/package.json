@@ -1,0 +1,19 @@
+{
+  "name": "@dsh-tui/chat",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Conversation controller for deepseek-harness-tui: Agent lifecycle, input routing, and exit",
+  "type": "module",
+  "exports": "./src/index.js",
+  "engines": {
+    "dsh": ">=0.2.1-rc.3 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-agent": "*",
+    "@deepseek-ai/dsh-llm": "*"
+  },
+  "dependencies": {
+    "@dsh-tui/render": "workspace:*"
+  },
+  "license": "MIT"
+}
