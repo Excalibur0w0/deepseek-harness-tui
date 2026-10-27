@@ -1,4 +1,4 @@
-# deepseek-harness-tui bundle: an interactive terminal chat directly over
+# @dsh-sdk/cli bundle: an interactive terminal chat directly over
 # dsh-base. Like dsh-headless it mounts no Host, HTTP server, or browser
 # plugin; the tui-* rows create one Agent and own the terminal until exit.
 # Each row is a workspace package under packages/; the root package.json lists
@@ -12,27 +12,27 @@
 - insert:
     # Terminal I/O; provides tuiConsole.
     - id: tui-console
-      name: '@dsh-tui/console'
+      name: '@dsh-sdk/console'
 
     # Agent lifecycle and input routing; provides tuiChat.
     - id: tui-chat
-      name: '@dsh-tui/chat'
+      name: '@dsh-sdk/chat'
 
     # Streamed replies, reasoning, tool calls, and turn endings.
     - id: tui-transcript
-      name: '@dsh-tui/transcript'
+      name: '@dsh-sdk/transcript'
 
     # Terminal answerer for approval/request and user-questions/request.
     - id: tui-interaction
-      name: '@dsh-tui/interaction'
+      name: '@dsh-sdk/interaction'
 
     # Slash-command registry and built-ins; provides tuiCommands.
     - id: tui-commands
-      name: '@dsh-tui/commands'
+      name: '@dsh-sdk/commands'
 
     # /connect: provider keys and custom model services; registers through tuiCommands.
     - id: tui-connect
-      name: '@dsh-tui/connect'
+      name: '@dsh-sdk/connect'
 
     # dsh-base omits ask_user_question; tui-interaction answers it in a panel.
     - id: tool-ask-user

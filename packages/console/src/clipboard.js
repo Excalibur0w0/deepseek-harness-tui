@@ -46,7 +46,7 @@ const WINDOWS_IMAGE = '$img = [System.Windows.Forms.Clipboard]::GetImage(); if (
 export async function readClipboardImage() {
   const os = platform()
   if (os === 'darwin') {
-    const file = join(tmpdir(), `dsh-tui-clipboard-${process.pid}.png`)
+    const file = join(tmpdir(), `dsh-cli-clipboard-${process.pid}.png`)
     try {
       await run('osascript', [
         '-e', 'set imageData to the clipboard as «class PNGf»',

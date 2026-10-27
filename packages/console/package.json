@@ -1,16 +1,27 @@
 {
-  "name": "@dsh-tui/console",
+  "name": "@dsh-sdk/console",
   "version": "0.2.0",
-  "private": true,
-  "description": "Full-screen OpenTUI host for deepseek-harness-tui: transcript, prompt, status row, and panels",
+  "description": "Full-screen OpenTUI host for dsh-cli: transcript, prompt, status row, and panels",
+  "homepage": "https://github.com/Excalibur0w0/deepseek-harness-tui#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Excalibur0w0/deepseek-harness-tui.git",
+    "directory": "packages/console"
+  },
+  "license": "MIT",
   "type": "module",
   "exports": "./src/index.js",
+  "files": [
+    "src"
+  ],
   "engines": {
     "dsh": ">=0.2.1-rc.3 <0.3.0"
   },
   "dependencies": {
-    "@dsh-tui/render": "workspace:*",
-    "@dsh-tui/ui": "workspace:*"
+    "@dsh-sdk/render": "workspace:*",
+    "@dsh-sdk/ui": "workspace:*"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }

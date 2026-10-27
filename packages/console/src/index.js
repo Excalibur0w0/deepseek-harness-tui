@@ -1,5 +1,5 @@
 /**
- * @dsh-tui/console — owns the terminal for the TUI as a full-screen OpenTUI
+ * @dsh-sdk/console — owns the terminal for the TUI as a full-screen OpenTUI
  * app laid out like opencode's session view: a scrolling transcript, the
  * prompt box with its model line, and a status row. It provides
  * `ctx.tuiConsole` and reports input as Cordis events: `tui/submit` (the
@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { currentPalette, errorMessage, imageMediaType, pastedPath } from '@dsh-tui/render'
+import { currentPalette, errorMessage, imageMediaType, pastedPath } from '@dsh-sdk/render'
 import {
   BoxRenderable,
   EMPTY_BORDER,
@@ -29,16 +29,22 @@ import {
   keyHints,
   spans,
   text,
-} from '@dsh-tui/ui'
+} from '@dsh-sdk/ui'
 import { readClipboardImage, readClipboardText } from './clipboard.js'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-console'
 
-const USAGE = `Usage: dsh --profile tui
+const USAGE = `Usage: dsh-cli
 
 Interactive terminal chat over DeepSeek Harness. The working directory is the
 directory you launch from; sessions are saved under $DSH_HOME/sessions.
+
+Environment:
+  DSH_CLI_PROFILE  dsh profile to run (default: tui)
+  DSH_TUI_NODE     Node.js with node:ffi to run on
+  DSH_REPO         run dsh from this deepseek-harness source checkout
+  DSH_HOME         dsh home directory (default: ~/.dsh)
 `
 
 /** Prompt history entries kept for ↑/↓ recall. */

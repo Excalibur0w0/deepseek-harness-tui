@@ -1,5 +1,5 @@
 /**
- * @dsh-tui/transcript — renders the current Agent's run in the transcript,
+ * @dsh-sdk/transcript — renders the current Agent's run in the transcript,
  * following opencode's session view: user messages as left-barred panels,
  * reasoning as a collapsible 已思考 line, replies as streamed markdown,
  * tool calls as one-line rows or panels (shell output, diffs, todos), and a
@@ -8,8 +8,8 @@
  * durable Session log (`session/event`).
  */
 
-import { errorMessage, filetypeOf, formatDuration, oneLine, previewLines, resultText, toolView, unifiedDiff } from '@dsh-tui/render'
-import { BoxRenderable, DiffRenderable, MarkdownRenderable, Spinner, discard, spans, splitBlock, text } from '@dsh-tui/ui'
+import { errorMessage, filetypeOf, formatDuration, oneLine, previewLines, resultText, toolView, unifiedDiff } from '@dsh-sdk/render'
+import { BoxRenderable, DiffRenderable, MarkdownRenderable, Spinner, discard, spans, splitBlock, text } from '@dsh-sdk/ui'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-transcript'

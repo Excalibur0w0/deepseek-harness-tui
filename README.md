@@ -1,18 +1,16 @@
-# deepseek-harness-tui
+# dsh-cli
 
 在终端里和 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下面简称 dsh）的 agent 对话。界面照着 [opencode](https://github.com/anomalyco/opencode) 做：上面是对话，下面是输入框，agent 读文件、跑命令、改代码的过程都会显示出来，需要权限时会弹出确认。
 
-![dshcli 的界面：上方是对话，折叠的思考、Markdown 回复和回合脚注；下方是输入框和当前模型](docs/screenshot.png)
+![dsh-cli 的界面：上方是对话，折叠的思考、Markdown 回复和回合脚注；下方是输入框和当前模型](https://raw.githubusercontent.com/Excalibur0w0/deepseek-harness-tui/main/docs/screenshot.png)
 
-它不是一个独立的程序，而是 dsh 的插件：你在哪个目录启动 `dshcli`，agent 就在哪个目录里干活，会话记录和 dsh 网页版共用。
+它是 dsh 的插件，npm 包名是 `@dsh-sdk/cli`。你在哪个目录启动 `dsh-cli`，agent 就在哪个目录里干活，会话记录和 dsh 网页版共用。
 
 ## 安装
 
-下面的步骤按顺序做一遍就能用。假设你把两个仓库都放在 `~/dsh` 目录下，换成别的目录也行，只要两个仓库在同一个父目录里。
-
 目前只在 macOS（Apple Silicon）上测过。Linux 应该能用，Windows 不支持。
 
-### 1. 准备 Node.js 26 和 pnpm
+### 1. 准备 Node.js 26
 
 界面库 OpenTUI 需要 Node.js 的 `node:ffi` 模块，这个模块要 Node 26.4 以上，而且只有 nodejs.org 发布的官方版本带。Homebrew 装的 Node 不带，用不了。
 
@@ -21,7 +19,6 @@
 ```sh
 nvm install 26
 nvm use 26
-npm install -g pnpm
 ```
 
 装完检查一下，输出 `ok` 就对了：
@@ -30,7 +27,7 @@ npm install -g pnpm
 node --experimental-ffi --input-type=module -e "await import('node:ffi'); console.log('ok')"
 ```
 
-如果你想继续用 Homebrew 的 Node 做别的事，也可以只给本项目准备一份官方 Node：从 nodejs.org 下载对应平台的压缩包，解压后把目录链接到 `~/.local/share/dsh-tui/node`。`dshcli` 启动时会优先找这里。
+如果你平时用的是别的 Node（Homebrew、Volta 或者更老的版本），也可以只给 dsh-cli 准备一份官方 Node：从 nodejs.org 下载对应平台的压缩包，解压后把目录链接到 `~/.local/share/dsh-tui/node`。`dsh-cli` 发现当前的 Node 不带 FFI 时会去这里找。
 
 ```sh
 V=v26.12.1
@@ -41,77 +38,41 @@ tar -xJf node-$V-$ARCH.tar.xz -C ~/.local/share/dsh-tui
 ln -sfn node-$V-$ARCH ~/.local/share/dsh-tui/node
 ```
 
-### 2. 下载并构建 dsh
+### 2. 安装 dsh-cli
 
 ```sh
-mkdir -p ~/dsh && cd ~/dsh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
-pnpm install
-pnpm run build
+npm install -g @dsh-sdk/cli
 ```
 
-`pnpm run build` 要跑一会儿。
+dsh 本体（`@deepseek-ai/dsh`）会一起装上，不用另外装 dsh 或 pnpm。dsh 带的依赖比较多，加起来九百多 MB，要等一会儿。npm 11 装完可能提示有几个包（node-pty、koffi 等）的安装脚本没运行，不影响使用，不用管。
 
-### 3. 下载本仓库
+### 3. 配置 API key
 
-```sh
-cd ~/dsh
-git clone https://github.com/Excalibur0w0/deepseek-harness-tui.git
-cd deepseek-harness-tui
-pnpm install
-```
-
-### 4. 把本仓库装进 dsh
-
-dsh 用 profile 区分不同的用法，本项目装在名为 `tui` 的 profile 里。这一步要回到 dsh 的目录执行：
-
-```sh
-cd ~/dsh/deepseek-harness
-pnpm dsh plugin --profile tui add ~/dsh/deepseek-harness-tui
-```
-
-第一次执行会创建 `~/.dsh/profiles/tui` 目录。装的是链接，以后改本仓库的代码，重启 `dshcli` 就生效，不用重装。
-
-检查是否装好：
-
-```sh
-pnpm dsh --profile tui --dump-config | grep "id: tui-"
-```
-
-能看到 `tui-console`、`tui-chat`、`tui-transcript`、`tui-interaction`、`tui-commands` 五行就对了。
-
-### 5. 配置 API key
-
-默认用 DeepSeek 官方 API 的 `deepseek-flash` 模型。先到 [platform.deepseek.com](https://platform.deepseek.com) 申请一个 key，第 7 步启动后在输入框里输入 `/connect`，选 DeepSeek，把 key 粘贴进去就行。
+默认用 DeepSeek 官方 API 的 `deepseek-flash` 模型。先到 [platform.deepseek.com](https://platform.deepseek.com) 申请一个 key，第 4 步启动后在输入框里输入 `/connect`，选 DeepSeek，把 key 粘贴进去就行。
 
 也可以现在就写进 `~/.dsh/.env`：
 
 ```sh
+mkdir -p ~/.dsh
 echo 'DEEPSEEK_API_KEY=sk-你的key' >> ~/.dsh/.env
 ```
 
 想用别的模型服务，看后面的「换成别的模型」。
 
-### 6. 把 `dshcli` 加到命令行
-
-```sh
-mkdir -p ~/.local/bin
-ln -s ~/dsh/deepseek-harness-tui/bin/dshcli ~/.local/bin/dshcli
-```
-
-`~/.local/bin` 要在 `PATH` 里。如果敲 `dshcli` 提示找不到命令，在 `~/.zshrc`（或 `~/.bashrc`）里加一行 `export PATH="$HOME/.local/bin:$PATH"`，然后开一个新终端。
-
-### 7. 启动
+### 4. 启动
 
 进到你想让 agent 干活的项目目录，运行：
 
 ```sh
 cd ~/某个项目
-dshcli
+dsh-cli
 ```
 
+第一次启动会先把自己装进 dsh 的 `tui` profile（`~/.dsh/profiles/tui`），终端里打印一行「把 … 装进 dsh 的 tui profile」，几秒钟就好，之后直接进界面。
+
 看到底部的输入框就说明成功了。随便问一句，比如「这个项目是做什么的」。按 Ctrl-D 或输入 `/exit` 退出，会话会自动保存。
+
+升级用 `npm install -g @dsh-sdk/cli@latest`，下次启动时会自动跟上新版本。
 
 ## 使用
 
@@ -199,25 +160,34 @@ agent 有时会给你几个选项让你选。上下键或数字键选，多选�
     model: some-model
 ```
 
-`input: [text, image]` 表示这个模型能看图，不写就只能发文字。改完重启 `dshcli` 生效。
+`input: [text, image]` 表示这个模型能看图，不写就只能发文字。改完重启 `dsh-cli` 生效。
 
 ## 遇到问题
 
 | 看到的提示 | 怎么办 |
 |---|---|
-| `dshcli: no deepseek-harness checkout at …` | dsh 不在本仓库的同级目录。把两个仓库放到同一个父目录，或者运行前设置 `DSH_REPO=/dsh的路径` |
-| `dshcli: workspace packages are not linked` | 在本仓库目录里执行 `pnpm install` |
-| `dshcli: no Node.js with node:ffi found` | 当前的 Node 不带 FFI，回到第 1 步。也可以用 `DSH_TUI_NODE=/某个/node` 指定 |
+| `dsh-cli：找不到支持 node:ffi 的 Node.js…` | 当前的 Node 不带 FFI，回到第 1 步。也可以用 `DSH_TUI_NODE=/某个/node` 指定 |
+| `npm error 404 … @dsh-sdk/cli` | 你用的 npm 镜像还没同步新版本，加上 `--registry https://registry.npmjs.org` 再装一次 |
+| `dsh-cli：没能装进 tui profile…` | 上面是 dsh 打印的原因，按它的提示处理 |
 | `the tui profile needs an interactive terminal` | 要在真正的终端里运行，不能接管道或重定向 |
-| 发消息后报 `MISSING_CREDENTIAL` | 没配 API key，回到第 5 步 |
+| 发消息后报 `MISSING_CREDENTIAL` | 没配 API key，回到第 3 步 |
 | `/model` 列表里没有某个模型 | 那个服务的 key 没配上（用 `/connect` 配），或者配置文件里没写这个模型 |
 
 dsh 运行时往 stderr 输出的信息不会弄乱界面，状态栏会显示「⚠ N 条诊断」，退出后再打印出来。
 
+### 环境变量
+
+| 变量 | 作用 |
+|---|---|
+| `DSH_CLI_PROFILE` | 用哪个 dsh profile，默认 `tui` |
+| `DSH_TUI_NODE` | 指定一个带 FFI 的 node |
+| `DSH_HOME` | dsh 的数据目录，默认 `~/.dsh` |
+| `DSH_REPO` | 用 dsh 源码运行，见「开发」 |
+
 ## 已知限制
 
 - 依赖 Node 的实验特性 `node:ffi`，以后 Node 或 OpenTUI 升级可能要跟着改。
-- 全屏界面不会把对话留在终端的滚动记录里。想回看完整对话，用 dsh 的网页版（在 dsh 目录执行 `pnpm dsh web`）。
+- 全屏界面不会把对话留在终端的滚动记录里。想回看完整对话，用 dsh 的网页版。
 - 还不能恢复之前的会话，只能 `/new` 开新的；旧会话可以在网页版里继续。
 - 代码高亮只支持 JavaScript、TypeScript、Markdown 和 Zig，其他语言显示成普通文字。
 - 打断一轮对话时，排在后面的消息也会一起取消，界面上会标「已取消，未发送」。
@@ -225,7 +195,20 @@ dsh 运行时往 stderr 输出的信息不会弄乱界面，状态栏会显示�
 
 ## 开发
 
-代码在 `packages/` 下，每个子目录一个包：
+从源码运行：
+
+```sh
+git clone https://github.com/Excalibur0w0/deepseek-harness-tui.git
+cd deepseek-harness-tui
+pnpm install
+bin/dsh-cli.js
+```
+
+`bin/dsh-cli.js` 用仓库里装好的 npm 版 dsh，并把 `tui` profile 链接到这个目录，改完代码重启就生效。全局装的 `dsh-cli` 和仓库里的共用 `tui` profile，最后启动的那个会把链接改成指向自己，想分开就设 `DSH_CLI_PROFILE`。
+
+要对着 dsh 源码调试，先按 dsh 的 README 准备好源码目录，再用 `DSH_REPO=/dsh源码目录 bin/dsh-cli.js` 启动。
+
+代码在 `packages/` 下，每个子目录是一个单独发布的包：
 
 - `console`：全屏界面的骨架，管输入框、状态栏、弹出面板和粘贴。
 - `chat`：管和 agent 的对话：发消息、等回复、退出时保存。
@@ -236,7 +219,7 @@ dsh 运行时往 stderr 输出的信息不会弄乱界面，状态栏会显示�
 - `ui`：对 OpenTUI 的一层封装，只有它直接用 OpenTUI。
 - `render`：配色、工具标题这类不涉及界面的小函数。
 
-改完代码重启 `dshcli` 就能看到效果，`pnpm check` 做语法检查。更多实现细节和约定写在 `CLAUDE.md` 里。
+根目录的 `@dsh-sdk/cli` 是 dsh 的 bundle，带着启动器 `bin/dsh-cli.js`。`pnpm check` 做语法检查。更多实现细节、验证和发布方法写在 `CLAUDE.md` 里。
 
 ## 致谢
 

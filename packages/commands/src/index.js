@@ -1,12 +1,12 @@
 /**
- * @dsh-tui/commands — the TUI's slash-command registry, provided as
+ * @dsh-sdk/commands — the TUI's slash-command registry, provided as
  * `ctx.tuiCommands`, the prompt's `/` completions, and the built-in commands
  * /help, /model, /new, /session, and /exit. Another plugin adds a command
  * with `ctx.effect(() => ctx.tuiCommands.register(command))`.
  */
 
-import { errorMessage, formatSelection } from '@dsh-tui/render'
-import { selectPanel, spans } from '@dsh-tui/ui'
+import { errorMessage, formatSelection } from '@dsh-sdk/render'
+import { selectPanel, spans } from '@dsh-sdk/ui'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-commands'

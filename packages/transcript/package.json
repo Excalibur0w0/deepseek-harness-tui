@@ -1,16 +1,27 @@
 {
-  "name": "@dsh-tui/transcript",
+  "name": "@dsh-sdk/transcript",
   "version": "0.2.0",
-  "private": true,
-  "description": "Renders user messages, streamed replies, reasoning, tool calls, and turn footers for deepseek-harness-tui",
+  "description": "Renders user messages, streamed replies, reasoning, tool calls, and turn footers for dsh-cli",
+  "homepage": "https://github.com/Excalibur0w0/deepseek-harness-tui#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Excalibur0w0/deepseek-harness-tui.git",
+    "directory": "packages/transcript"
+  },
+  "license": "MIT",
   "type": "module",
   "exports": "./src/index.js",
+  "files": [
+    "src"
+  ],
   "engines": {
     "dsh": ">=0.2.1-rc.3 <0.3.0"
   },
   "dependencies": {
-    "@dsh-tui/render": "workspace:*",
-    "@dsh-tui/ui": "workspace:*"
+    "@dsh-sdk/render": "workspace:*",
+    "@dsh-sdk/ui": "workspace:*"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }

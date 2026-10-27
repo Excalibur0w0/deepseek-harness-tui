@@ -1,6 +1,25 @@
 packages:
   - packages/*
 
-# dsh packages are peers that the running dsh supplies at load time; do not
-# install registry copies of them.
-autoInstallPeers: false
+# A flat node_modules like the one npm gives a global install, so the dsh tree
+# has one copy of each package (pnpm's isolated layout splits dsh-agent into
+# per-peer-set copies).
+nodeLinker: hoisted
+
+# autoInstallPeers stays at pnpm's default: the npm dsh tree relies on its
+# peers being installed. The dsh packages our plugins import are optional
+# peers, so no registry copies of them land next to the plugins; the running
+# dsh supplies them at load time.
+
+# Install scripts in the npm dsh tree this repository depends on, reviewed as
+# deepseek-harness's own pnpm-workspace.yaml reviews them.
+allowBuilds:
+  # Persistent PTY backend for the terminal tools.
+  node-pty: true
+  # Restores the executable bit on node-pty's macOS spawn helper.
+  '@deepseek-ai/dsh-subprocess-local': true
+  # Prebuilt FFI binary used for durable session writes on Windows.
+  koffi: true
+  # No-op scripts pulled in by pi-ai's optional backends.
+  '@google/genai': false
+  protobufjs: false

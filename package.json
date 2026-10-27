@@ -1,12 +1,33 @@
 {
-  "name": "deepseek-harness-tui",
+  "name": "@dsh-sdk/cli",
   "version": "0.2.0",
-  "private": true,
-  "description": "A minimal interactive terminal chat for DeepSeek Harness, mounted as a dsh profile app",
+  "description": "dsh-cli: a full-screen terminal chat for DeepSeek Harness, installed as a dsh profile bundle",
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "deepseek-harness",
+    "tui",
+    "cli",
+    "agent"
+  ],
+  "homepage": "https://github.com/Excalibur0w0/deepseek-harness-tui#readme",
+  "bugs": "https://github.com/Excalibur0w0/deepseek-harness-tui/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Excalibur0w0/deepseek-harness-tui.git"
+  },
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.28.5",
+  "bin": {
+    "dsh-cli": "bin/dsh-cli.js"
+  },
+  "files": [
+    "bin",
+    "cordis.patch.yml"
+  ],
   "engines": {
-    "node": ">=24.9.0",
+    "node": ">=20",
     "dsh": ">=0.2.1-rc.3 <0.3.0"
   },
   "dsh": {
@@ -15,15 +36,19 @@
     }
   },
   "scripts": {
-    "check": "for file in packages/*/src/*.js; do node --check \"$file\" || exit 1; done"
+    "check": "for file in bin/*.js packages/*/src/*.js; do node --check \"$file\" || exit 1; done"
   },
   "dependencies": {
-    "@dsh-tui/chat": "workspace:*",
-    "@dsh-tui/commands": "workspace:*",
-    "@dsh-tui/connect": "workspace:*",
-    "@dsh-tui/console": "workspace:*",
-    "@dsh-tui/interaction": "workspace:*",
-    "@dsh-tui/transcript": "workspace:*"
+    "@deepseek-ai/dsh": "0.2.1-rc.3",
+    "@dsh-sdk/chat": "workspace:*",
+    "@dsh-sdk/commands": "workspace:*",
+    "@dsh-sdk/connect": "workspace:*",
+    "@dsh-sdk/console": "workspace:*",
+    "@dsh-sdk/interaction": "workspace:*",
+    "@dsh-sdk/transcript": "workspace:*",
+    "pnpm": "11.28.5"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }

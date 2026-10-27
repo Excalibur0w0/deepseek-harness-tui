@@ -1,5 +1,5 @@
 /**
- * @dsh-tui/interaction — the terminal answerer for tool approvals
+ * @dsh-sdk/interaction — the terminal answerer for tool approvals
  * (`approval/request`) and `ask_user_question` (`user-questions/request`),
  * shown as opencode-style panels in place of the prompt. It is the profile's
  * only terminal answerer and answers for every Agent in the process,
@@ -8,8 +8,8 @@
  * (callId, outcome) so the transcript can mark refused calls.
  */
 
-import { toolView } from '@dsh-tui/render'
-import { BoxRenderable, ListView, TextareaRenderable, discard, keyHints, panelFrame, spans, text } from '@dsh-tui/ui'
+import { toolView } from '@dsh-sdk/render'
+import { BoxRenderable, ListView, TextareaRenderable, discard, keyHints, panelFrame, spans, text } from '@dsh-sdk/ui'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-interaction'

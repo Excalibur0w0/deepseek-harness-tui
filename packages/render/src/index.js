@@ -1,5 +1,5 @@
 /**
- * @dsh-tui/render — presentation data and pure formatting shared by the TUI
+ * @dsh-sdk/render — presentation data and pure formatting shared by the TUI
  * plugins: the opencode color palette and syntax rules, how each dsh tool
  * call is titled, and one-line summaries of arguments, results, paths,
  * durations, model selections, and errors. No terminal or dsh imports.

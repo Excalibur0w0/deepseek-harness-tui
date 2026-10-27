@@ -1,5 +1,5 @@
 /**
- * @dsh-tui/chat — the conversation controller. It creates one Agent through
+ * @dsh-sdk/chat — the conversation controller. It creates one Agent through
  * the core registry, routes terminal input to the Agent or to slash commands,
  * waits for each run to settle as the headless runner does, and saves the
  * Session on exit. Prompts with pasted images are admitted through
@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { errorMessage } from '@dsh-tui/render'
+import { errorMessage } from '@dsh-sdk/render'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-chat'
@@ -51,6 +51,8 @@ class TuiChat {
     this.terminal = ctx.get('tuiConsole')
     /** The Agent the prompt talks to; replaced by `newSession()`. */
     this.agent = undefined
+    /** The current Agent's model selection on dsh releases without `agent.model`. */
+    this.selectionRef = undefined
     this.cwd = process.cwd()
     this.running = false
     this.closing = false
@@ -75,18 +77,23 @@ class TuiChat {
 
   async createAgent() {
     const selection = this.ctx.get('agentDefaultModel').currentSelection()
+    // dsh 0.2.1-rc.3 routes requests through a selection ref owned by the
+    // caller; later releases ignore the ref and expose agent.model instead.
+    const selectionRef = { current: { ...selection }, assembled: undefined }
     const { agent } = await this.ctx.get('agents').create({
       sessionId: `session-${randomUUID()}`,
       meta: { cwd: this.cwd },
       agentOptions: { ...selection },
-      setup: agentCtx => { installModelSelection(agentCtx) },
+      setup: agentCtx => { installModelSelection(agentCtx, selectionRef) },
     })
     await agent.whenIdle()
+    this.selectionRef = selectionRef
     return agent
   }
 
   /** @returns {{ provider: string, model: string, reasoningEffort?: string }} the current Agent's model selection. */
   currentModel() {
+    if (this.agent.model === undefined) return this.selectionRef.current ?? this.agent.options
     return this.agent.model.current() ?? this.agent.options
   }
 
@@ -95,7 +102,8 @@ class TuiChat {
    * @param {{ provider: string, model: string }} target - provider/model pair.
    */
   selectModel(target) {
-    this.agent.model.select(target)
+    if (this.agent.model === undefined) this.selectionRef.current = { ...target }
+    else this.agent.model.select(target)
     this.showModel()
   }
 

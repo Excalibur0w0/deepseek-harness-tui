@@ -1,5 +1,5 @@
 /**
- * @dsh-tui/ui — the TUI's OpenTUI layer. It is the only package that imports
+ * @dsh-sdk/ui — the TUI's OpenTUI layer. It is the only package that imports
  * `@opentui/core`; the plugins use the classes it re-exports so the whole
  * repository loads one OpenTUI instance. It also holds the opencode-style
  * pieces the plugins share: the split border, styled spans, spinners,
@@ -20,7 +20,7 @@ import {
   createCliRenderer,
   decodePasteBytes,
 } from '@opentui/core'
-import { syntaxRules } from '@dsh-tui/render'
+import { syntaxRules } from '@dsh-sdk/render'
 
 export {
   BoxRenderable,

@@ -2,50 +2,55 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-本仓库是 DeepSeek Harness（dsh）的全屏终端对话界面，界面照 opencode 的会话页做，用 OpenTUI 渲染。它是一个 pnpm monorepo：根目录是装进 `tui` profile 的 bundle，`packages/` 下是运行在 dsh 进程内的几个 Cordis 插件和两个库。用法见 `README.md`；本文件只记录开发命令、运行时约束，以及需要去 dsh 仓库和 opencode 源码对照的接口，不重复 README。行为或限制变化后同步更新 `README.md`。
+本仓库是 DeepSeek Harness（dsh）的全屏终端对话界面，界面照 opencode 的会话页做，用 OpenTUI 渲染。它是一个 pnpm monorepo，发布到 npm 的 `@dsh-sdk` 组织下：根目录 `@dsh-sdk/cli` 是装进 `tui` profile 的 bundle，带着启动器 `bin/dsh-cli.js`；`packages/` 下是运行在 dsh 进程内的几个 Cordis 插件和两个库，各自发布成 `@dsh-sdk/<目录名>`。用法见 `README.md`；本文件只记录开发命令、运行时约束，以及需要去 dsh 仓库和 opencode 源码对照的接口，不重复 README。行为或限制变化后同步更新 `README.md`。
 
 ## 常用命令
 
 ```sh
-pnpm install      # 建立 packages/* 的 workspace 链接并安装 OpenTUI；新增或改名子包、改依赖后重跑
-pnpm check        # 对 packages/*/src/*.js 逐个 node --check（没有构建）
+pnpm install      # workspace 链接、OpenTUI，以及 npm 版 dsh（根包依赖精确版本的 @deepseek-ai/dsh）；改依赖后重跑
+pnpm check        # 对 bin/*.js 和 packages/*/src/*.js 逐个 node --check（没有构建）
 
 # 运行：在任意目录启动，agent 的工作区就是当前目录
-dshcli                                         # ~/.local/bin/dshcli -> bin/dshcli
-DSH_REPO=/path/to/deepseek-harness dshcli      # dsh 仓库不在同级目录 ../deepseek-harness 时
-DSH_TUI_NODE=/path/to/node dshcli              # 指定带 node:ffi 的 Node
-
-# 以下在 dsh 仓库执行
-pnpm dsh --profile tui --dump-config           # 确认有 "# == deepseek-harness-tui" 层、tui-* 行和 tool-ask-user 行
-pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重新安装
+bin/dsh-cli.js                                  # 用 node_modules 里的 npm 版 dsh；~/.local/bin/dsh-cli 可以链到这里
+DSH_REPO=/path/to/deepseek-harness bin/dsh-cli.js   # 改用 dsh 源码（tsx 启动），对照 dsh 新接口时用
+DSH_TUI_NODE=/path/to/node bin/dsh-cli.js       # 指定带 node:ffi 的 Node
+DSH_CLI_PROFILE=tui-dev bin/dsh-cli.js           # 换一个 profile，不和全局安装的 dsh-cli 抢 tui
+DSH_HOME=<目录> bin/dsh-cli.js                  # 用隔离的 dsh home，首次运行自动建 profile
+bin/dsh-cli.js --dump-config                    # dsh 自己的参数照常透传；确认有 "# == @dsh-sdk/cli" 层、tui-* 行和 tool-ask-user 行
 ```
 
-- 改代码后重启 `dshcli` 即生效：profile 以 `link:` 指向本仓库根目录。改了根 `package.json` 的 `dsh` 或 `engines` 字段才需要重新 add。
-- 不要用 `pnpm dsh --profile tui` 跑 TUI：pnpm 脚本总在 dsh 仓库根目录执行，工作区会变成 dsh 仓库，而且 pnpm 用的 Node 不带 FFI。`bin/dshcli` 保留调用者的 cwd，挑一个带 `node:ffi` 的 Node 并加 `--experimental-ffi --disable-warning=ExperimentalWarning`，再把 `TSX_TSCONFIG_PATH` 指向 dsh 仓库的 `tsconfig.json`，复现 `pnpm dsh` 的 tsx 源码启动。
+- 启动器 `bin/dsh-cli.js` 在任何 Node 上都能跑：
+  - 先找一个带 `node:ffi` 的 Node（`DSH_TUI_NODE`、当前 Node、`~/.local/share/dsh-tui/node/bin/node`、PATH 上的 `node`，逐个用 `--experimental-ffi` 探测）。
+  - 再检查 `$DSH_HOME/profiles/<profile>/package.json` 是否已经把 `@dsh-sdk/cli` 以 `link:` 指向本包目录、并列在 bundles 里；不是就先跑一次 `plugin --profile <profile> add <本包目录>`。全局安装和仓库共用一个 profile 时，每次切换都会重新链接。
+  - 最后带 `--experimental-ffi --disable-warning=ExperimentalWarning` 在子进程里启动 dsh，参数是 `--profile <profile>` 加用户传的参数。父进程忽略 SIGINT（终端会把 Ctrl-C 发给整个前台进程组），转发 SIGTERM/SIGHUP，退出码跟随子进程。
+  - npm 模式的子进程入口是 `bin/run.js`：调用 `@deepseek-ai/dsh/lib/bin.js` 导出的 `runCli({ packageManager })`，把本包依赖的 pnpm 交给 dsh，所以 PATH 上没有 pnpm 也能 `plugin add`。源码模式跑 `apps/cli/src/bin.ts`，用 PATH 上的 pnpm。
+- 不要用 `NODE_OPTIONS` 传 `--experimental-ffi`：agent 跑的 node 子进程会继承它，在不带 FFI 的 node 上直接报 bad option。
+- 改代码后重启即生效：profile 以 `link:` 指向本仓库根目录。
 - 带 FFI 的 Node 默认放在 `~/.local/share/dsh-tui/node`（nodejs.org 的官方构建，`node` 是指向版本目录的符号链接）。Homebrew 的 Node 编译时没带 FFI，`--experimental-ffi` 会报 bad option。
 
 ## 验证
 
 - 没有测试套件和 linter。TUI 要求 stdin 和 stdout 都是 TTY，在 Bash 工具里直接运行会报错退出（`--help` 和非 TTY 报错这两条路径可以直接跑）；`script` 命令在这个沙箱里也拿不到 TTY。
 - 交互验证分两步：
-  1. 用 Python `pty.fork()` 启动 `bin/dshcli`，窗口设成 120×40，按步骤写入输入并把原始输出录下来。
+  1. 用 Python `pty.fork()` 启动 `bin/dsh-cli.js`，窗口设成 120×40，按步骤写入输入并把原始输出录下来。
      - 普通字符逐个写入；转义序列（方向键 `\x1b[C`，以及以 `\x1b[<` 开头的 SGR 鼠标序列）必须一次写完，拆开会被解析成单独的 Esc。
      - 鼠标：OpenTUI 开了 1000/1002/1003/1006 模式。拖选用 `\x1b[<0;列;行M` 按下、`\x1b[<32;列;行M` 拖动、`\x1b[<0;列;行m` 松开（行列从 1 开始）。测复制时先备份 `pbpaste` 的内容、测完 `pbcopy` 恢复，并且要有一个应当复制的对照组，否则「没复制」证明不了什么。
      - 回车写 `\r`，Ctrl-C 写 `\x03`，Ctrl-T 写 `\x14`，Esc 单独写 `\x1b`。
      - 以状态栏的「发送」判断就绪，以回合脚注的 `▣` 判断回合结束，以「需要确认」「enter 确认」判断面板出现。
+     - 脚注 `▣` 在 `turn/end` 时就画出来了，但 chat 要等 Agent 和子 agent 都空闲、`sessions.flush()` 完成后才退出运行状态；这期间提交的 `/命令` 会被当成排队消息发给模型。紧接着发命令前，先等状态栏重新出现「发送」。
   2. 再用 `@xterm/headless`（dsh 的 pnpm store 里有 6.0.0）把录下的字节回放成屏幕文本来检查。查看时保留空行，否则看不出块之间的间距。
 - 交互验证会调用真实模型，先确认 tui profile 配置的模型服务可用。本机的模型服务、网关和注意事项写在不入库的 `CLAUDE.local.md` 里。
 - 测图片：用括号粘贴（`\x1b[200~路径\x1b[201~`）模拟把文件拖进终端，不用动系统剪贴板。要让图片真正发出去，需要一个声明了图片输入的模型；可以用 `--patch` 叠加一份只改了 `defaultInput` 的 `llm-pi-ai` 行，不改用户的 profile。测 Ctrl+V 会改用户的系统剪贴板，先备份剪贴板内容，测完恢复。
-- 测 `/connect` 会写 key 和 profile 配置，不要在用户的 `~/.dsh` 上测：用 `DSH_HOME=<scratchpad>/dshhome` 在 dsh 仓库里 `pnpm dsh plugin --profile tui add <本仓库>` 装一个临时 profile，再用同样的 `DSH_HOME` 启动 `bin/dshcli`。自定义服务用本地起一个返回 `{ data: [{ id }] }` 的 `/v1/models` 假服务来测。差分渲染只输出变化的格子，面板标题只改了一个字时 `until` 匹配不到完整文字，用截图判断。
+- 测 `/connect` 会写 key 和 profile 配置，不要在用户的 `~/.dsh` 上测：用 `DSH_HOME=<scratchpad>/dshhome` 启动 `bin/dsh-cli.js`，启动器会自动建好临时 profile。要在隔离 home 里调真实模型，先跑一次 `--help` 建 profile，再把用户 `tui` profile 的 `cordis.patch.yml` 复制过去、把 `~/.dsh/.credentials.yaml` 符号链接过去。自定义服务用本地起一个返回 `{ data: [{ id }] }` 的 `/v1/models` 假服务来测。差分渲染只输出变化的格子，面板标题只改了一个字时 `until` 匹配不到完整文字，用截图判断。
 - 测审批时选一个会被 workspace-write 沙箱拦下的操作，例如写 `~` 下的文件（`/tmp` 可写，不会触发审批），并选「拒绝」。测提问让模型调用 `ask_user_question`。每次验证都会在 `~/.dsh/sessions` 留下会话。
 - 中文输入法、鼠标滚动和复制在 pty 里测不了，要请用户在真实终端里试。
 
 ## 架构
 
 - `cordis.patch.yml` 是叠在 `@deepseek-ai/dsh-base` 之后的 bundle 层：
-  - 插入 5 个 `tui-*` 行，加上 `tool-ask-user`（`dsh-base` 不带 `ask_user_question` 工具）。
+  - 插入 6 个 `tui-*` 行，加上 `tool-ask-user`（`dsh-base` 不带 `ask_user_question` 工具）。
   - 覆盖 `system-prompt` 的 `personaPrefix`，关闭 `hmr`（配置热重载会在对话中途重新挂载 TUI）。
-  - 行里按包名写插件（`name: '@dsh-tui/chat'`）：dsh 从 bundle 的 `package.json` 出发遍历 `dependencies`，为 bundle 建解析条目，所以根 `package.json` 用 `workspace:*` 列出每个插件包。
+  - 行里按包名写插件（`name: '@dsh-sdk/chat'`）：dsh 从 bundle 的 `package.json` 出发遍历 `dependencies`，为 bundle 建解析条目，所以根 `package.json` 用 `workspace:*` 列出每个插件包。
 - 插件之间不互相 import，只通过 `ctx.provide` 的服务和 Cordis 事件协作。
   - 服务是普通对象，`ctx.get()` 拿到的就是原对象（没有 tracker 就不包代理），可以直接比较 Agent 身份。
   - 依赖方向：`chat → console`，`transcript`/`commands → chat, console`，`interaction → console`。`chat` 用 `ctx.get('tuiCommands')`、`interaction` 用 `ctx.get('tuiChat')` 按需获取，不写进 `inject`，避免成环。
@@ -103,22 +108,26 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
 
 - 纯 ESM JavaScript，不构建。不要改成 TypeScript：npm 安装的 dsh 不经 tsx 加载插件。不要引入 JSX：opencode 的 Solid 组件只能对照着用 OpenTUI 的命令式接口重写。
 - OpenTUI：
-  - **版本**：`@opentui/core` 用精确版本（现为 0.6.8），它的 peer `web-tree-sitter` 也写进 `ui` 的 `dependencies`（因为 `autoInstallPeers: false`）。升级时先在 scratchpad 里用最小脚本验证；0.6 起 `SyntaxStyle.fromTheme/fromStyles` 的第二个参数要传 `renderer.nativeScene`。
+  - **版本**：`@opentui/core` 用精确版本（现为 0.6.8），它的 peer `web-tree-sitter` 也用精确版本写进 `ui` 的 `dependencies`。升级时先在 scratchpad 里用最小脚本验证；0.6 起 `SyntaxStyle.fromTheme/fromStyles` 的第二个参数要传 `renderer.nativeScene`。
   - **运行要求**：OpenTUI 在 Node 上依赖 `node:ffi`，需要 Node ≥ 26.4，且编译时带 FFI，启动时加 `--experimental-ffi`。
   - **代码高亮**：只启用了 OpenTUI 内置的 javascript、typescript、markdown、zig parser，不在线下载其他语言。
 - 运行时只有 `packages/chat` import `@deepseek-ai/dsh-agent` 和 `@deepseek-ai/dsh-llm`，由 dsh 的 peer 拦截解析到宿主 dsh 自己的副本。
   - 某个子包新增 dsh 运行时 import 时，必须加进**该子包**的 `peerDependencies`；拦截按 import 所在文件向上找最近的 `package.json` 判断。
   - 其余 dsh 能力用 `ctx.get('<service>')` 获取。
-  - `pnpm-workspace.yaml` 设了 `autoInstallPeers: false`，不会从 registry 装 dsh 的副本。
-- peer 拦截只覆盖 profile 里直接 `link:` 的目录。所以只能 link 仓库根目录，不能单独 `plugin add` 某个子包，否则其他子包里的 dsh import 会找不到宿主副本。规则见 dsh 仓库的 `.agents/notes/implemented/architecture/2026-09-19-profile-resolution-lookup-order.md`。
+  - 这些 peer 的范围和 `engines.dsh` 相同（`*` 不匹配预发布版本），并在 `peerDependenciesMeta` 里标成 optional：npm 全局安装和本仓库的 pnpm 都不会为它们另装一份。npm 版 dsh 自己的包依赖 peer 自动安装，所以 `pnpm-workspace.yaml` 不能设 `autoInstallPeers: false`。
+- peer 拦截只覆盖 profile 里直接 `link:` 的目录。启动器总是 link 根包目录（仓库根目录，或者 npm 全局安装的 `@dsh-sdk/cli` 目录，子包在它的 `node_modules` 里），不能单独 `plugin add` 某个子包，否则其他子包里的 dsh import 会找不到宿主副本。规则见 dsh 仓库的 `.agents/notes/implemented/architecture/2026-09-19-profile-resolution-lookup-order.md`。
 - 新增插件包：
-  1. 在 `packages/<名字>/` 建 `package.json`：`@dsh-tui/<名字>`、`exports`、`engines.dsh`，`dependencies` 里写用到的 `@dsh-tui/render`、`@dsh-tui/ui`（`workspace:*`）。每个插件行的包都要过 dsh 的版本兼容检查，所以插件包都写 `engines.dsh`。
+  1. 在 `packages/<名字>/` 建 `package.json`：`@dsh-sdk/<名字>`、`exports`、`engines.dsh`，`dependencies` 里写用到的 `@dsh-sdk/render`、`@dsh-sdk/ui`（`workspace:*`）。每个插件行的包都要过 dsh 的版本兼容检查，所以插件包都写 `engines.dsh`。
   2. 在根 `package.json` 的 `dependencies` 和 `cordis.patch.yml` 里各加一项。
   3. 再 `pnpm install`。
-- `link:` 安装不会安装本仓库的 `dependencies`，依赖都靠本仓库自己的 `pnpm install`。要引入第三方包，加到用它的子包的 `dependencies` 里；pnpm 11 有最小发布时长检查，太新的版本会被拦下（`pnpm add` 会往 `pnpm-workspace.yaml` 写豁免），优先选已经发布几天的版本。
-- 用到的都是 dsh 尚未稳定的内部接口，`engines.dsh` 限定为 `>=0.2.1-rc.3 <0.3.0`。dsh 升级后先跑 `--dump-config` 和一次交互验证。接口签名对照 dsh 仓库：
+- `link:` 安装不会安装被链接目录的 `dependencies`：仓库里靠自己的 `pnpm install`，全局安装靠 npm。`pnpm-workspace.yaml` 用 `nodeLinker: hoisted`，让仓库的 `node_modules` 和 npm 全局安装一样平铺（pnpm 默认的隔离布局会把 dsh 自己的 `dsh-agent` 按 peer 组合拆成多份）；`allowBuilds` 照 dsh 仓库的审核结果放行 node-pty 等安装脚本。要引入第三方包，加到用它的子包的 `dependencies` 里；pnpm 11 有最小发布时长检查，太新的版本会被拦下（`pnpm add` 会往 `pnpm-workspace.yaml` 写豁免），优先选已经发布几天的版本。
+- 用到的都是 dsh 尚未稳定的内部接口，`engines.dsh` 限定为 `>=0.2.1-rc.3 <0.3.0`，根包依赖精确版本的 `@deepseek-ai/dsh`（现为 0.2.1-rc.3，npm 上在 `next` 标签下）。dsh 升级后先跑 `--dump-config` 和一次交互验证，并且 npm 模式和 `DSH_REPO` 源码模式都要跑。
+  - 已发布的 rc.3 和 dsh 主干的差别：rc.3 没有 `agent.model`，`installModelSelection(agentCtx, ref)` 从调用方持有的 `{ current, assembled }` 里取模型；主干的 `installModelSelection(agentCtx)` 忽略第二个参数，选择记录在 Session 上。`chat` 的 `currentModel()`/`selectModel()` 按有没有 `agent.model` 分两条路，最低版本升到带 `agent.model` 的版本后删掉 ref 那条。
+  - 查某个接口在已发布版本里有没有：在 dsh 仓库对 `dsh-v<版本>` 标签 `git grep`/`git diff`。
+- 接口签名对照 dsh 仓库：
   - `packages/bundle/headless/src/index.ts`：创建 Agent、等待空闲、流式输出思考的参考实现
-  - `packages/core/agent/src/runtime-types.ts`：`Agent`（`followup`、`cancel`、`whenIdle`、`model.select`）
+  - `apps/cli/src/bin.ts`：`runCli` 和 `packageManager`（`{ command, args, env }`）；`packages/boot/plugin-manager/src/operations.ts`：pnpm 怎么被调用
+  - `packages/core/agent/src/runtime-types.ts`：`Agent`（`followup`、`cancel`、`whenIdle`，主干还有 `model.current/select`）
   - `packages/llm/llm/src/types.ts`：`StreamChunk`
   - `packages/core/session/src/types.ts`：`SessionEventMap`、`TurnEndReason`
   - `packages/fs/tool-fs/src/diff.ts`：write/edit 结果 `meta.diffs` 的格式
@@ -135,9 +144,20 @@ pnpm dsh plugin --profile tui add "$(cd ../deepseek-harness-tui && pwd)"   # 重
   - `theme/assets/opencode.json`、`theme/index.ts`：色板和语法规则
 - stdout 归 TUI 独占，诊断写 stderr（运行期间会被缓存，退出后写出）。监听一律通过 `ctx.on`/`ctx.effect` 注册，随插件卸载自动撤销。
 
+## 发布
+
+- 9 个包同步发版：根包和 `packages/*` 的 `version` 一起改。`workspace:*` 在打包时由 pnpm 换成实际版本；根目录的 `LICENSE` 由 pnpm 自动放进每个子包。
+- 发布前在 scratchpad 里完整演练一遍：
+  1. `pnpm -r pack --pack-destination <目录>`，列出每个 tarball 的文件，并搜索 provider 名、网关端口、本机路径等不该出现的字符串。
+  2. 用 verdaccio 起本地 registry：`@dsh-sdk/*` 只存本地，其余包代理到镜像，`publish: $all`，npmrc 里给一个占位 token。`NPM_CONFIG_USERCONFIG=<scratch npmrc> pnpm -r publish --registry http://127.0.0.1:4873/ --no-git-checks` 会按依赖顺序发布包括根包在内的 9 个包。
+  3. 用带 FFI 的 Node 自带的 npm（不要用 Volta 的 npm，它会接管 `-g`）`npm i -g --prefix <目录> @dsh-sdk/cli`，再用隔离的 `DSH_HOME`、PATH 里只有不带 FFI 的 node 和不带 pnpm 的情况下跑 `<目录>/bin/dsh-cli`：首次运行自动建 profile、对话、bash 工具、审批、`/model`、`/connect`、`/exit`。
+  - npm 11 默认不跑依赖的安装脚本，但 node-pty 的预编译包和 `spawn-helper` 的可执行位都在 tarball 里，不影响 bash 工具。
+- 正式发布：用户的 `~/.npmrc` 默认 registry 是国内镜像，所以要显式指定 npmjs：`pnpm -r publish --access public --registry https://registry.npmjs.org`。`pnpm publish` 要求工作区干净、在 main 分支上，发布前先提交。npm 账号的登录由用户自己做（`npm login --registry https://registry.npmjs.org`）。
+- 镜像同步有延迟，刚发布时从镜像装会 404。
+
 ## 配置
 
-- 模型配置不在本仓库，在用户级的 `~/.dsh` 里：`~/.dsh/profiles/tui/cordis.patch.yml` 的 `llm-pi-ai`（provider）和 `agent-default-model`（默认模型）两行；patch 会替换整行 config，修改时保留其他 provider。凭据在 `~/.dsh/.credentials.yaml`，所有 profile 共用。
+- 模型配置不在本仓库，在用户级的 `~/.dsh` 里：`~/.dsh/profiles/tui/cordis.patch.yml`（换了 `DSH_CLI_PROFILE` 就是那个 profile）的 `llm-pi-ai`（provider）和 `agent-default-model`（默认模型）两行；patch 会替换整行 config，修改时保留其他 provider。凭据在 `~/.dsh/.credentials.yaml`，所有 profile 共用。
 - 不要把具体的 provider、模型名、网关地址或凭据写进仓库，这些只写在 `CLAUDE.local.md`。
 
 ## 约定

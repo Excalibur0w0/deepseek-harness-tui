@@ -1,5 +1,5 @@
 /**
- * @dsh-tui/connect — the `/connect` command, after opencode's provider
+ * @dsh-sdk/connect — the `/connect` command, after opencode's provider
  * dialog. It lists dsh's configurable provider directory
  * (`ctx.llm.listConfigurableProviders()`), stores an API key through
  * `ctx.credentials`, and records the route through `ctx.settings`, the same
@@ -9,8 +9,8 @@
  * listing parser does not keep.
  */
 
-import { errorMessage } from '@dsh-tui/render'
-import { inputPanel, selectPanel, spans } from '@dsh-tui/ui'
+import { errorMessage } from '@dsh-sdk/render'
+import { inputPanel, selectPanel, spans } from '@dsh-sdk/ui'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-connect'

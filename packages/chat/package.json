@@ -1,19 +1,38 @@
 {
-  "name": "@dsh-tui/chat",
+  "name": "@dsh-sdk/chat",
   "version": "0.2.0",
-  "private": true,
-  "description": "Conversation controller for deepseek-harness-tui: Agent lifecycle, input routing, and exit",
+  "description": "Conversation controller for dsh-cli: Agent lifecycle, input routing, and exit",
+  "homepage": "https://github.com/Excalibur0w0/deepseek-harness-tui#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Excalibur0w0/deepseek-harness-tui.git",
+    "directory": "packages/chat"
+  },
+  "license": "MIT",
   "type": "module",
   "exports": "./src/index.js",
+  "files": [
+    "src"
+  ],
   "engines": {
     "dsh": ">=0.2.1-rc.3 <0.3.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-agent": "*",
-    "@deepseek-ai/dsh-llm": "*"
+    "@deepseek-ai/dsh-agent": ">=0.2.1-rc.3 <0.3.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.3 <0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    }
   },
   "dependencies": {
-    "@dsh-tui/render": "workspace:*"
+    "@dsh-sdk/render": "workspace:*"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }

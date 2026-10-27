@@ -1,17 +1,28 @@
 {
-  "name": "@dsh-tui/ui",
+  "name": "@dsh-sdk/ui",
   "version": "0.2.0",
-  "private": true,
-  "description": "OpenTUI components shared by the deepseek-harness-tui plugins",
+  "description": "OpenTUI components shared by the dsh-cli plugins",
+  "homepage": "https://github.com/Excalibur0w0/deepseek-harness-tui#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Excalibur0w0/deepseek-harness-tui.git",
+    "directory": "packages/ui"
+  },
+  "license": "MIT",
   "type": "module",
   "exports": "./src/index.js",
+  "files": [
+    "src"
+  ],
   "engines": {
     "node": ">=26.4.0"
   },
   "dependencies": {
-    "@dsh-tui/render": "workspace:*",
+    "@dsh-sdk/render": "workspace:*",
     "@opentui/core": "0.6.8",
     "web-tree-sitter": "0.25.10"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }

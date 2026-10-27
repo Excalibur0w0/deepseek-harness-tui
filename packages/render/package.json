@@ -1,12 +1,23 @@
 {
-  "name": "@dsh-tui/render",
+  "name": "@dsh-sdk/render",
   "version": "0.2.0",
-  "private": true,
-  "description": "Palette, syntax rules, tool titles, and formatting shared by the deepseek-harness-tui packages",
+  "description": "Palette, syntax rules, tool titles, and formatting shared by the dsh-cli packages",
+  "homepage": "https://github.com/Excalibur0w0/deepseek-harness-tui#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Excalibur0w0/deepseek-harness-tui.git",
+    "directory": "packages/render"
+  },
+  "license": "MIT",
   "type": "module",
   "exports": "./src/index.js",
+  "files": [
+    "src"
+  ],
   "dependencies": {
     "diff": "9.0.0"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }
